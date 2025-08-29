@@ -76,6 +76,7 @@
 		<module>vector-stores/spring-ai-pinecone-store</module>
 		<module>vector-stores/spring-ai-qdrant-store</module>
 		<module>vector-stores/spring-ai-redis-store</module>
+		<module>vector-stores/spring-ai-solr-store</module>
 		<module>vector-stores/spring-ai-typesense-store</module>
 		<module>vector-stores/spring-ai-weaviate-store</module>
 
@@ -221,6 +222,7 @@
 		<module>spring-ai-integration-tests</module>
 
 		<module>mcp/common</module>
+		<module>../../microsearch/projects/spring-ai-metabrain</module>
 	</modules>
 
 	<organization>
