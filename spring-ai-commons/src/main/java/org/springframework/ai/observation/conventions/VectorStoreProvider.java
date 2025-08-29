@@ -136,6 +136,11 @@ public enum VectorStoreProvider {
 	SIMPLE("simple"),
 
 	/**
+	 * Vector store provided by Apache Solr.
+	 */
+	SOLR("solr"),
+
+	/**
 	 * Vector store provided by Typesense.
 	 */
 	TYPESENSE("typesense"),
