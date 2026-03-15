@@ -16,17 +16,17 @@
 
 package org.springframework.ai.vectorstore.solr;
 
-import org.springframework.ai.vectorstore.filter.Filter;
-import org.springframework.ai.vectorstore.filter.Filter.Expression;
-import org.springframework.ai.vectorstore.filter.Filter.Key;
-import org.springframework.ai.vectorstore.filter.converter.AbstractFilterExpressionConverter;
-
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
 import java.util.TimeZone;
 import java.util.regex.Pattern;
+
+import org.springframework.ai.vectorstore.filter.Filter;
+import org.springframework.ai.vectorstore.filter.Filter.Expression;
+import org.springframework.ai.vectorstore.filter.Filter.Key;
+import org.springframework.ai.vectorstore.filter.converter.AbstractFilterExpressionConverter;
 
 /**
  * SolrAiSearchFilterExpressionConverter is a class that converts Filter.Expression
@@ -50,81 +50,60 @@ public class SolrAiSearchFilterExpressionConverter extends AbstractFilterExpress
 	@Override
 	protected void doExpression(Expression expression, StringBuilder context) {
 		switch (expression.type()) {
-			case AND:
-			case OR:
-				context.append("(");
+			case AND, OR -> {
 				this.convertOperand(expression.left(), context);
-				context.append(") ");
 				context.append(getOperationSymbol(expression));
-				context.append(" (");
+				this.convertOperand(expression.right(), context);
+			}
+			case EQ -> {
+				this.convertOperand(expression.left(), context);
+				context.append(":");
+				this.convertOperand(expression.right(), context);
+			}
+			case NE -> {
+				this.convertOperand(expression.left(), context);
+				context.append(": NOT ");
+				this.convertOperand(expression.right(), context);
+			}
+			case LT -> {
+				this.convertOperand(expression.left(), context);
+				context.append(":[* TO ");
+				this.convertOperand(expression.right(), context);
+				context.append("}");
+			}
+			case LTE -> {
+				this.convertOperand(expression.left(), context);
+				context.append(":[* TO ");
+				this.convertOperand(expression.right(), context);
+				context.append("]");
+			}
+			case GT -> {
+				this.convertOperand(expression.left(), context);
+				context.append(":{");
+				this.convertOperand(expression.right(), context);
+				context.append(" TO *]");
+			}
+			case GTE -> {
+				this.convertOperand(expression.left(), context);
+				context.append(":[");
+				this.convertOperand(expression.right(), context);
+				context.append(" TO *]");
+			}
+			case IN -> {
+				this.convertOperand(expression.left(), context);
+				context.append(":(");
 				this.convertOperand(expression.right(), context);
 				context.append(")");
-				return;
-
-			case NOT:
+			}
+			case NIN -> {
 				context.append("NOT ");
 				this.convertOperand(expression.left(), context);
-				return;
-
-			case NIN:
-				context.append("NOT ");
-			case IN:
-				this.convertOperand(expression.left(), context);
-				context.append("(");
+				context.append(":(");
 				this.convertOperand(expression.right(), context);
 				context.append(")");
-				return;
-
-			case NE:
-				context.append("NOT ");
-			case EQ:
-				context.append(expression.right());
-				return;
-
-			case GT:
-				this.handleRange(context, expression.left(), "{", expression.right(), true, "}");
-				return;
-
-			case LT:
-				this.handleRange(context, expression.left(), "{", expression.left(), false, "}");
-				return;
-
-			case GTE:
-				this.handleRange(context, expression.left(), "[", expression.left(), true, "]");
-				return;
-
-			case LTE:
-				this.handleRange(context, expression.left(), "[", expression.left(), false, "]");
-				return;
+			}
+			default -> throw new RuntimeException("Not supported expression type: " + expression.type());
 		}
-
-		if (expression.type() == Filter.ExpressionType.IN || expression.type() == Filter.ExpressionType.NIN) {
-			context.append(getOperationSymbol(expression));
-			context.append("(");
-			this.convertOperand(expression.left(), context);
-			this.convertOperand(expression.right(), context);
-			context.append(")");
-		}
-		else {
-			this.convertOperand(expression.left(), context);
-			context.append(getOperationSymbol(expression));
-			this.convertOperand(expression.right(), context);
-		}
-	}
-
-	private void handleRange(StringBuilder context, Filter.Operand leftOperand, String startRangeOp,
-			Filter.Operand rightOperand, boolean leftWild, String endRangeOp) {
-		this.convertOperand(leftOperand, context);
-		context.append(startRangeOp);
-		if (leftWild) {
-			context.append("* TO ");
-			this.convertOperand(rightOperand, context);
-		}
-		else {
-			this.convertOperand(rightOperand, context);
-			context.append(" TO *");
-		}
-		context.append(endRangeOp);
 	}
 
 	@Override
@@ -137,32 +116,21 @@ public class SolrAiSearchFilterExpressionConverter extends AbstractFilterExpress
 
 	@Override
 	protected void doAddValueRangeSpitter(Filter.Value listValue, StringBuilder context) {
+		context.append(" OR ");
 	}
 
 	private String getOperationSymbol(Expression exp) {
 		return switch (exp.type()) {
 			case AND -> " AND ";
 			case OR -> " OR ";
-			case EQ, IN -> "";
-			case NE -> " NOT ";
-			case LT -> "<";
-			case LTE -> "<=";
-			case GT -> ">";
-			case GTE -> ">=";
-			case NIN -> "NOT ";
-			default -> throw new RuntimeException("Not supported expression type: " + exp.type());
+			default -> "";
 		};
 	}
 
 	@Override
 	public void doKey(Key key, StringBuilder context) {
 		var identifier = hasOuterQuotes(key.key()) ? removeOuterQuotes(key.key()) : key.key();
-		var prefixedIdentifier = withMetaPrefix(identifier);
-		context.append(prefixedIdentifier.trim()).append(":");
-	}
-
-	public String withMetaPrefix(String identifier) {
-		return identifier;
+		context.append("metadata.").append(identifier.trim());
 	}
 
 	@Override

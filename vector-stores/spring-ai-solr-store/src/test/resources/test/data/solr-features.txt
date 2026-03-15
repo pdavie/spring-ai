@@ -1,0 +1,5 @@
+Solr is a powerful search server that supports distributed indexing, replication, and load-balanced querying. 
+It is designed for scalability and fault tolerance. 
+Solr includes a comprehensive administration interface, making it easy to manage your search collections.
+It also supports a wide range of data formats, including JSON, XML, and CSV.
+The vector search capabilities in Solr allow for semantic search, using dense vector representations of documents.

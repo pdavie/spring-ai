@@ -16,19 +16,28 @@
 
 package org.springframework.ai.vectorstore.solr;
 
+import java.io.IOException;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.client.solrj.impl.CloudSolrClient;
 import org.apache.solr.client.solrj.impl.Http2SolrClient;
 import org.apache.solr.client.solrj.request.CollectionAdminRequest;
+import org.apache.solr.client.solrj.request.schema.FieldTypeDefinition;
+import org.apache.solr.client.solrj.request.schema.SchemaRequest;
 import org.apache.solr.common.SolrDocument;
 import org.apache.solr.common.SolrInputDocument;
 import org.apache.solr.common.params.ModifiableSolrParams;
-import org.eclipse.jetty.util.IO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import org.springframework.ai.document.Document;
-import org.springframework.ai.document.DocumentMetadata;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.embedding.EmbeddingOptionsBuilder;
 import org.springframework.ai.observation.conventions.VectorStoreProvider;
@@ -43,31 +52,22 @@ import org.springframework.beans.factory.InitializingBean;
 import org.springframework.lang.NonNull;
 import org.springframework.util.Assert;
 
-import java.io.IOException;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.stream.Collectors;
-
 /**
- * TODO: Update based upon Solr implementation Solr-based vector store implementation
- * using the dense_vector field type.
+ * Solr-based vector store implementation using the dense_vector field type.
  *
  * <p>
- * The store uses an Elasticsearch index to persist vector embeddings along with their
- * associated document content and metadata. The implementation leverages Elasticsearch's
- * k-NN search capabilities for efficient similarity search operations.
+ * The store uses a Solr collection to persist vector embeddings along with their
+ * associated document content and metadata. The implementation leverages Solr's vector
+ * similarity search capabilities for efficient similarity search operations.
  * </p>
  *
  * <p>
  * Features:
  * </p>
  * <ul>
- * <li>Automatic schema initialization with configurable index creation</li>
- * <li>Support for multiple similarity functions: Cosine, L2 Norm, and Dot Product</li>
- * <li>Metadata filtering using Elasticsearch query strings</li>
+ * <li>Automatic schema initialization with configurable collection creation</li>
+ * <li>Support for multiple similarity functions: Cosine, Euclidean, and Dot Product</li>
+ * <li>Metadata filtering using Solr query strings</li>
  * <li>Configurable similarity thresholds for search results</li>
  * <li>Batch processing support with configurable strategies</li>
  * <li>Observation and metrics support through Micrometer</li>
@@ -77,7 +77,7 @@ import java.util.stream.Collectors;
  * Basic usage example:
  * </p>
  * <pre>{@code
- * ElasticsearchVectorStore vectorStore = ElasticsearchVectorStore.builder(restClient, embeddingModel)
+ * SolrVectorStore vectorStore = SolrVectorStore.builder(solrClient, embeddingModel)
  *     .initializeSchema(true)
  *     .build();
  *
@@ -100,15 +100,14 @@ import java.util.stream.Collectors;
  * Advanced configuration example:
  * </p>
  * <pre>{@code
- * ElasticsearchVectorStoreOptions options = new ElasticsearchVectorStoreOptions();
+ * SolrVectorStoreOptions options = new SolrVectorStoreOptions();
  * options.setIndexName("custom_vectors");
  * options.setSimilarity(SimilarityFunction.dot_product);
  * options.setDimensions(1536);
  *
- * ElasticsearchVectorStore vectorStore = ElasticsearchVectorStore.builder(restClient, embeddingModel)
+ * SolrVectorStore vectorStore = SolrVectorStore.builder(solrClient, embeddingModel)
  *     .options(options)
  *     .initializeSchema(true)
- *     .batchingStrategy(new TokenCountBatchingStrategy())
  *     .build();
  * }</pre>
  *
@@ -116,21 +115,10 @@ import java.util.stream.Collectors;
  * Requirements:
  * </p>
  * <ul>
- * <li>Elasticsearch 8.0 or later</li>
+ * <li>Solr 9.0 or later</li>
+ * <li>The 'vector-search' module must be enabled in Solr</li>
  * <li>Index mapping with id (string), content (text), metadata (object), and embedding
  * (dense_vector) fields</li>
- * </ul>
- *
- * <p>
- * Similarity Functions:
- * </p>
- * <ul>
- * <li>cosine: Default, suitable for most use cases. Measures cosine similarity between
- * vectors.</li>
- * <li>l2_norm: Euclidean distance between vectors. Lower values indicate higher
- * similarity.</li>
- * <li>dot_product: Best performance for normalized vectors (e.g., OpenAI
- * embeddings).</li>
  * </ul>
  *
  * @author Jemin Huh
@@ -176,28 +164,33 @@ public class SolrVectorStore extends AbstractObservationVectorStore implements I
 
 	@Override
 	public void doAdd(List<Document> documents) {
-		// For the index to be present, either it must be pre-created or set the
-		// initializeSchema to true.
-		if (!indexExists()) {
-			throw new IllegalArgumentException("Index not found");
+		if (this.initializeSchema) {
+			afterPropertiesSet();
 		}
 
 		List<float[]> embeddings = this.embeddingModel.embed(documents, EmbeddingOptionsBuilder.builder().build(),
 				this.batchingStrategy);
 
 		try {
-			var response = solrClient.add(documents.stream().map(d -> {
-				var s = new SolrInputDocument(d.getId(), d.getText());
+			var response = this.solrClient.add(this.options.getIndexName(), documents.stream().map(d -> {
+				var s = new SolrInputDocument();
+				s.addField("id", d.getId());
+				s.addField("content", d.getText());
 				for (var entry : d.getMetadata().entrySet()) {
 					s.addField(entry.getKey(), entry.getValue());
 				}
-				s.addField(VECTOR_FIELD_NAME, Arrays.asList(embeddings.get(documents.indexOf(d))));
+				final float[] embedding = embeddings.get(documents.indexOf(d));
+				List<Float> embeddingList = IntStream.range(0, embedding.length)
+					.mapToObj(i -> embedding[i])
+					.collect(Collectors.toList());
+				s.addField(VECTOR_FIELD_NAME, embeddingList);
 				return s;
 			}).collect(Collectors.toList()));
 
 			if (response.getStatus() != 0) {
-				throw new IllegalStateException(response.getException().getMessage());
+				throw new IllegalStateException("Failed to add documents to Solr");
 			}
+			this.solrClient.commit(this.options.getIndexName());
 		}
 		catch (SolrServerException | IOException e) {
 			throw new RuntimeException(e);
@@ -207,7 +200,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore implements I
 	@Override
 	public void doDelete(List<String> idList) {
 		try {
-			var response = solrClient.deleteById(idList);
+			var response = this.solrClient.deleteById(idList);
 			if (response.getStatus() != 0) {
 				throw new IllegalStateException("Delete operation failed", response.getException());
 			}
@@ -239,26 +232,31 @@ public class SolrVectorStore extends AbstractObservationVectorStore implements I
 
 	@Override
 	public List<Document> doSimilaritySearch(SearchRequest searchRequest) {
-		Assert.notNull(searchRequest, "The search request must not be null.");
+		if (this.initializeSchema) {
+			afterPropertiesSet();
+		}
+
 		try {
-			float threshold = (float) searchRequest.getSimilarityThreshold();
-			// reverting l2_norm distance to its original value
-			if (this.options.getSimilarity().equals(SimilarityFunction.euclidean)) {
-				// ???
-			}
-			final float finalThreshold = threshold;
 			float[] vectors = this.embeddingModel.embed(searchRequest.getQuery());
+			String vectorString = IntStream.range(0, vectors.length)
+				.mapToObj(i -> String.valueOf(vectors[i]))
+				.collect(Collectors.joining(",", "[", "]"));
 
 			var solrParams = new ModifiableSolrParams();
-			solrParams.add("q", String.format("{!vectorSimilarity f=%s minReturn=%0.1d topK=%d}%s", VECTOR_FIELD_NAME,
-					finalThreshold, searchRequest.getTopK(), Arrays.toString(vectors)));
+			solrParams.add("q", String.format("{!vectorSimilarity f=%s topK=%d}%s", VECTOR_FIELD_NAME,
+					searchRequest.getTopK(), vectorString));
 			if (searchRequest.hasFilterExpression()) {
 				solrParams.add("fq", getSolrQueryString(searchRequest.getFilterExpression()));
 			}
 			solrParams.add("fl", "*,score");
+			solrParams.add("rows", String.valueOf(searchRequest.getTopK()));
 
 			var response = this.solrClient.query(this.options.getIndexName(), solrParams);
-			return response.getResults().stream().map(this::toDocument).collect(Collectors.toList());
+			return response.getResults()
+				.stream()
+				.map(this::toDocument)
+				.filter(d -> d.getScore() >= searchRequest.getSimilarityThreshold())
+				.collect(Collectors.toList());
 		}
 		catch (SolrServerException | IOException e) {
 			throw new RuntimeException(e);
@@ -272,51 +270,77 @@ public class SolrVectorStore extends AbstractObservationVectorStore implements I
 	}
 
 	private Document toDocument(SolrDocument hit) {
-		Document document = new Document((String) hit.getFieldValue("body"), hit.getFieldValueMap());
+		String id = (String) hit.getFieldValue("id");
+		String content = (String) hit.getFieldValue("content");
+		Map<String, Object> metadata = hit.getFieldValueMap();
+		metadata.remove("id");
+		metadata.remove("content");
+		metadata.remove(VECTOR_FIELD_NAME);
+
+		Document document = new Document(id, content, metadata);
 		Document.Builder documentBuilder = document.mutate();
 		if (hit.get("score") != null) {
-			var score = (Double) hit.get("score");
-			documentBuilder.metadata(DocumentMetadata.DISTANCE.value(), 1 - normalizeSimilarityScore(score));
-			documentBuilder.score(normalizeSimilarityScore(score));
+			float score = (Float) hit.get("score");
+			double normalizedScore = normalizeSimilarityScore(score);
+			documentBuilder.score(normalizedScore);
 		}
 		return documentBuilder.build();
 	}
 
-	// more info on score/distance calculation
-	// https://www.elastic.co/guide/en/elasticsearch/reference/current/knn-search.html#knn-similarity-search
 	private double normalizeSimilarityScore(double score) {
-		switch (this.options.getSimilarity()) {
-			case euclidean:
-				// the returned value of l2_norm is the opposite of the other functions
-				// (closest to zero means more accurate), so to make it consistent
-				// with the other functions the reverse is returned applying a "1-"
-				// to the standard transformation
-				return (1 - (Math.sqrt((1 / score) - 1)));
-			// cosine and dot_product
-			default:
-				return (2 * score) - 1;
+		if (this.options.getSimilarity().equals(SimilarityFunction.euclidean)) {
+			return 1.0 / (1.0 + score);
 		}
+		return score;
 	}
 
 	public boolean indexExists() {
 		try {
-			return CollectionAdminRequest.collectionStatus(this.options.getIndexName()).process(solrClient).isSuccess();
+			List<String> collections = CollectionAdminRequest.listCollections(this.solrClient);
+			return collections != null && collections.contains(this.options.getIndexName());
 		}
 		catch (SolrServerException | IOException e) {
-			throw new RuntimeException(e);
+			throw new RuntimeException("Failed to check if index exists", e);
 		}
 	}
 
-	private void createIndexMapping() {
+	public void createIndexMapping() {
 		try {
-			var response = CollectionAdminRequest.createCollection(this.options.getIndexName(), 1, 1)
-				.process(solrClient);
-			if (!response.isSuccess()) {
-
+			// Create collection if it doesn't exist
+			if (!indexExists()) {
+				var createRequest = CollectionAdminRequest.createCollection(this.options.getIndexName(), 1, 1);
+				createRequest.process(this.solrClient);
 			}
+
+			// Add field type for dense vector
+			FieldTypeDefinition fieldTypeDefinition = new FieldTypeDefinition();
+			Map<String, Object> attributes = new java.util.HashMap<>();
+			attributes.put("name", "knn_vector_" + this.embeddingModel.dimensions());
+			attributes.put("class", "solr.DenseVectorField");
+			attributes.put("vectorDimension", this.embeddingModel.dimensions());
+			attributes.put("similarityFunction", this.options.getSimilarity().name());
+			attributes.put("knnAlgorithm", "hnsw");
+			fieldTypeDefinition.setAttributes(attributes);
+
+			new SchemaRequest.AddFieldType(fieldTypeDefinition).process(this.solrClient, this.options.getIndexName());
+
+			new SchemaRequest.AddField(Map.of("name", "content", "type", "text_general", "stored", true))
+				.process(this.solrClient, this.options.getIndexName());
+
+			new SchemaRequest.AddField(Map.of("name", VECTOR_FIELD_NAME, "type",
+					"knn_vector_" + this.embeddingModel.dimensions(), "indexed", true, "stored", true))
+				.process(this.solrClient, this.options.getIndexName());
+
+			// Dynamic field for metadata
+			new SchemaRequest.AddDynamicField(
+					Map.of("name", "*", "type", "text_general", "indexed", true, "stored", true))
+				.process(this.solrClient, this.options.getIndexName());
+
 		}
 		catch (SolrServerException | IOException e) {
-			throw new RuntimeException(e);
+			// It might fail if fields already exist, we can ignore those or check first
+			logger.warn("Schema initialization might have partially failed or schema already exists: {}",
+					e.getMessage());
 		}
 	}
 
@@ -332,7 +356,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore implements I
 
 	@Override
 	public VectorStoreObservationContext.Builder createObservationContextBuilder(String operationName) {
-		return VectorStoreObservationContext.builder(VectorStoreProvider.ELASTICSEARCH.value(), operationName)
+		return VectorStoreObservationContext.builder(VectorStoreProvider.SOLR.value(), operationName)
 			.collectionName(this.options.getIndexName())
 			.dimensions(this.embeddingModel.dimensions())
 			.similarityMetric(getSimilarityMetric());
