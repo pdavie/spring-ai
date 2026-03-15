@@ -16,11 +16,21 @@
 
 package org.springframework.ai.vectorstore.solr;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.ZonedDateTime;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.function.Consumer;
+
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.client.solrj.SolrServerException;
-import org.apache.solr.client.solrj.impl.CloudHttp2SolrClient;
-import org.apache.solr.client.solrj.impl.CloudSolrClient;
 import org.apache.solr.client.solrj.impl.Http2SolrClient;
 import org.apache.solr.client.solrj.request.CollectionAdminRequest;
 import org.apache.solr.client.solrj.response.CollectionAdminResponse;
@@ -31,6 +41,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.testcontainers.containers.SolrContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
+
 import org.springframework.ai.document.Document;
 import org.springframework.ai.document.DocumentMetadata;
 import org.springframework.ai.embedding.EmbeddingModel;
@@ -45,25 +60,6 @@ import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.io.DefaultResourceLoader;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.SolrContainer;
-import org.testcontainers.containers.wait.strategy.Wait;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
-
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
-import java.time.ZonedDateTime;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.UUID;
-import java.util.concurrent.TimeUnit;
-import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.equalTo;
@@ -73,31 +69,16 @@ import static org.hamcrest.Matchers.hasSize;
 @EnabledIfEnvironmentVariable(named = "OPENAI_API_KEY", matches = ".+")
 class SolrVectorStoreIT extends BaseVectorStoreTests {
 
-	private static final String SOLR_IMAGE = "latest";
+	private static final String SOLR_IMAGE = "solr:9.8";
 
 	private static final String TEST_COLLECTION = "spring-ai-document-index";
 
 	@Container
-	private static final SolrContainer SolrContainer = new SolrContainer(SOLR_IMAGE).withZookeeper(true)
-		.withCollection(TEST_COLLECTION);
+	private static final SolrContainer SOLR_CONTAINER = new SolrContainer(DockerImageName.parse(SOLR_IMAGE))
+		.withZookeeper(true);
 
 	static {
-		try (GenericContainer<?> solr = new GenericContainer<>(DockerImageName.parse("solr:latest"))
-			.withExposedPorts(8983)
-			.waitingFor(Wait.forHttp("/solr/admin/info/system"))) {
-
-			solr.start();
-
-			// Execute the solr-install command inside the container
-			org.testcontainers.containers.Container.ExecResult result = solr
-				.execInContainer("/opt/solr/bin/solr-install", "-install-module", "vector-search");
-
-			// Check the exit code for success
-			assertThat(result.getExitCode()).equals(0);
-		}
-		catch (IOException | InterruptedException e) {
-			throw new RuntimeException(e);
-		}
+		SOLR_CONTAINER.start();
 	}
 
 	private final List<Document> documents = List.of(
@@ -107,9 +88,8 @@ class SolrVectorStoreIT extends BaseVectorStoreTests {
 
 	@BeforeAll
 	public static void beforeAll() {
-		Awaitility.setDefaultPollInterval(2, TimeUnit.SECONDS);
+		Awaitility.setDefaultPollInterval(Duration.ofSeconds(2));
 		Awaitility.setDefaultPollDelay(Duration.ZERO);
-		Awaitility.setDefaultTimeout(Duration.ofMinutes(1));
 	}
 
 	private String getText(String uri) {
@@ -150,8 +130,8 @@ class SolrVectorStoreIT extends BaseVectorStoreTests {
 	public void addAndDeleteDocumentsTest() {
 		getContextRunner().run(context -> {
 			SolrVectorStore vectorStore = context.getBean("vectorStore_cosine", SolrVectorStore.class);
-			CloudSolrClient solrClient = context.getBean(CloudSolrClient.class);
-			Object documentCount = getDocumentCount(solrClient, TEST_COLLECTION);
+			SolrClient solrClient = context.getBean(SolrClient.class);
+			long documentCount = getDocumentCount(solrClient, TEST_COLLECTION);
 			assertThat(documentCount).isEqualTo(0);
 
 			vectorStore.add(this.documents);
@@ -164,11 +144,12 @@ class SolrVectorStoreIT extends BaseVectorStoreTests {
 		});
 	}
 
-	private static Object getDocumentCount(CloudSolrClient solrClient, final String collectionName)
+	private static long getDocumentCount(SolrClient solrClient, final String collectionName)
 			throws SolrServerException, IOException {
-		CollectionAdminResponse response = CollectionAdminRequest.collectionStatus(collectionName).process(solrClient);
-		Object documentCount = response.getCollectionStatus().get("index").getVal(0);
-		return documentCount;
+		var query = new SolrQuery("*:*");
+		query.setRows(0);
+		var response = solrClient.query(collectionName, query);
+		return response.getResults().getNumFound();
 	}
 
 	@ParameterizedTest(name = "{0} : {displayName} ")
@@ -208,7 +189,7 @@ class SolrVectorStoreIT extends BaseVectorStoreTests {
 	}
 
 	@ParameterizedTest(name = "{0} : {displayName} ")
-	@ValueSource(strings = { "cosine", "l2_norm", "dot_product" })
+	@ValueSource(strings = { "cosine", "euclidean", "dot_product" })
 	public void searchWithFilters(String similarityFunction) {
 
 		getContextRunner().run(context -> {
@@ -483,35 +464,35 @@ class SolrVectorStoreIT extends BaseVectorStoreTests {
 
 	@SpringBootConfiguration
 	@EnableAutoConfiguration(exclude = { DataSourceAutoConfiguration.class })
-	public static class TestApplication {
+	static class TestApplication {
 
 		@Bean("vectorStore_cosine")
-		public SolrVectorStore vectorStoreDefault(EmbeddingModel embeddingModel, CloudSolrClient.Builder builder) {
+		public SolrVectorStore vectorStoreDefault(EmbeddingModel embeddingModel, Http2SolrClient.Builder builder) {
 			return SolrVectorStore.builder(embeddingModel)
-				.cloudSolrClientBuilder(builder)
+				.http2SolrClientBuilder(builder)
 				.initializeSchema(true)
 				.build();
 		}
 
 		@Bean("vectorStore_euclidean")
-		public SolrVectorStore vectorStoreEuclidean(EmbeddingModel embeddingModel, CloudSolrClient.Builder builder) {
+		public SolrVectorStore vectorStoreEuclidean(EmbeddingModel embeddingModel, Http2SolrClient.Builder builder) {
 			SolrVectorStoreOptions options = new SolrVectorStoreOptions();
 			options.setIndexName("index_euclidean");
 			options.setSimilarity(SimilarityFunction.euclidean);
 			return SolrVectorStore.builder(embeddingModel)
-				.cloudSolrClientBuilder(builder)
+				.http2SolrClientBuilder(builder)
 				.initializeSchema(true)
 				.options(options)
 				.build();
 		}
 
 		@Bean("vectorStore_dot_product")
-		public SolrVectorStore vectorStoreDotProduct(EmbeddingModel embeddingModel, CloudSolrClient.Builder builder) {
+		public SolrVectorStore vectorStoreDotProduct(EmbeddingModel embeddingModel, Http2SolrClient.Builder builder) {
 			SolrVectorStoreOptions options = new SolrVectorStoreOptions();
 			options.setIndexName("index_dot_product");
 			options.setSimilarity(SimilarityFunction.dot_product);
 			return SolrVectorStore.builder(embeddingModel)
-				.cloudSolrClientBuilder(builder)
+				.http2SolrClientBuilder(builder)
 				.initializeSchema(true)
 				.options(options)
 				.build();
@@ -523,38 +504,9 @@ class SolrVectorStoreIT extends BaseVectorStoreTests {
 		}
 
 		@Bean
-		List<String> zkHosts() {
-			return List.of("localhost:" + SolrContainer.getZookeeperPort());
-		}
-
-		@Bean
-		SolrClient solrClient(CloudHttp2SolrClient.Builder cloudHttp2SolrClientBuilder) {
-			return cloudHttp2SolrClientBuilder.build();
-		}
-
-		@Bean
-		Http2SolrClient.Builder http2SolrClientBuilder() {
-			return new Http2SolrClient.Builder();
-		}
-
-		@Bean
-		SolrClient SolrClient(Http2SolrClient.Builder builder) {
-			return builder.build();
-		}
-
-		@Bean
-		CloudSolrClient.Builder cloudSolrClientBuilder(List<String> zkHosts, Optional<String> zkChroot) {
-			return new CloudSolrClient.Builder(zkHosts, zkChroot);
-		}
-
-		@Bean
-		CloudHttp2SolrClient.Builder cloudHttp2SolrClientBuilder(List<String> solrUrls, Optional<String> zkChroot) {
-			return new CloudHttp2SolrClient.Builder(solrUrls, zkChroot);
-		}
-
-		@Bean
-		CloudSolrClient cloudSolrClient(CloudSolrClient.Builder cloudSolrClientBuilder) {
-			return cloudSolrClientBuilder.build();
+		public Http2SolrClient.Builder http2SolrClientBuilder() {
+			return new Http2SolrClient.Builder(
+					"http://" + SOLR_CONTAINER.getHost() + ":" + SOLR_CONTAINER.getSolrPort() + "/solr");
 		}
 
 	}

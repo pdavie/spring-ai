@@ -60,6 +60,8 @@ public final class SpringAIVectorStoreTypes {
 
 	public static final String REDIS = "redis";
 
+	public static final String SOLR = "solr";
+
 	public static final String TYPESENSE = "typesense";
 
 	public static final String WEAVIATE = "weaviate";

@@ -16,6 +16,14 @@
 
 package org.springframework.ai.vectorstore.solr;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.TimeUnit;
+
 import io.micrometer.observation.ObservationRegistry;
 import io.micrometer.observation.tck.TestObservationRegistry;
 import io.micrometer.observation.tck.TestObservationRegistryAssert;
@@ -26,6 +34,12 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.testcontainers.containers.SolrContainer;
+import org.testcontainers.containers.wait.strategy.Wait;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
+
 import org.springframework.ai.document.Document;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.embedding.TokenCountBatchingStrategy;
@@ -45,18 +59,6 @@ import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.io.DefaultResourceLoader;
-import org.testcontainers.containers.SolrContainer;
-import org.testcontainers.containers.wait.strategy.Wait;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
-
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.greaterThan;
@@ -227,10 +229,12 @@ public class SolrVectorStoreObservationIT {
 		@Bean
 		public SolrVectorStore vectorStoreDefault(EmbeddingModel embeddingModel, CloudSolrClient.Builder builder,
 				ObservationRegistry observationRegistry) {
+			SolrVectorStoreOptions options = new SolrVectorStoreOptions();
+			options.setIndexName(VECTOR_STORE_COLLECTION);
 			return SolrVectorStore.builder(embeddingModel)
 				.cloudSolrClientBuilder(builder)
 				.initializeSchema(true)
-				.options(new SolrVectorStoreOptions())
+				.options(options)
 				.observationRegistry(observationRegistry)
 				.customObservationConvention(null)
 				.batchingStrategy(new TokenCountBatchingStrategy())
@@ -244,7 +248,8 @@ public class SolrVectorStoreObservationIT {
 
 		@Bean
 		CloudSolrClient.Builder solrClientBuilder() {
-			return new CloudSolrClient.Builder(List.of("localhost:" + solrContainer.getZookeeperPort()));
+			return new CloudSolrClient.Builder(
+					List.of(solrContainer.getHost() + ":" + solrContainer.getZookeeperPort()), Optional.empty());
 		}
 
 	}

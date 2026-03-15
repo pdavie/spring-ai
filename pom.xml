@@ -144,6 +144,7 @@
 		<module>auto-configurations/vector-stores/spring-ai-autoconfigure-vector-store-typesense</module>
 		<module>auto-configurations/vector-stores/spring-ai-autoconfigure-vector-store-weaviate</module>
 		<module>auto-configurations/vector-stores/spring-ai-autoconfigure-vector-store-pgvector</module>
+		<module>auto-configurations/vector-stores/spring-ai-autoconfigure-vector-store-solr</module>
 
 		<module>spring-ai-spring-boot-starters/spring-ai-starter-vector-store-aws-opensearch</module>
 		<module>spring-ai-spring-boot-starters/spring-ai-starter-vector-store-azure</module>
@@ -165,6 +166,7 @@
 		<module>spring-ai-spring-boot-starters/spring-ai-starter-vector-store-redis</module>
 		<module>spring-ai-spring-boot-starters/spring-ai-starter-vector-store-typesense</module>
 		<module>spring-ai-spring-boot-starters/spring-ai-starter-vector-store-weaviate</module>
+		<module>spring-ai-spring-boot-starters/spring-ai-starter-vector-store-solr</module>
 
 		<module>models/spring-ai-anthropic</module>
 		<module>models/spring-ai-azure-openai</module>
