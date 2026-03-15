@@ -16,9 +16,6 @@
 
 package org.springframework.ai.vectorstore.idol;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
-
 import org.springframework.ai.vectorstore.filter.Filter;
 import org.springframework.ai.vectorstore.filter.converter.AbstractFilterExpressionConverter;
 
@@ -27,7 +24,7 @@ import org.springframework.ai.vectorstore.filter.converter.AbstractFilterExpress
  *
  * @author pdavie
  */
-public final class IdolFilterExpressionConverter extends AbstractFilterExpressionConverter {
+public class IdolFilterExpressionConverter extends AbstractFilterExpressionConverter {
 
 	@Override
 	protected void doExpression(Filter.Expression expression, StringBuilder context) {
@@ -119,17 +116,12 @@ public final class IdolFilterExpressionConverter extends AbstractFilterExpressio
 
 	@Override
 	protected void doSingleValue(Object value, StringBuilder context) {
-		if (value instanceof String stringValue) {
-			try {
-				context.append(URLEncoder.encode(stringValue, StandardCharsets.UTF_8).replace("+", "%20"));
-			}
-			catch (Exception e) {
-				throw new RuntimeException(e);
-			}
-		}
-		else {
-			context.append(value);
-		}
+		context.append(value);
+	}
+
+	@Override
+	protected void doAddValueRangeSpitter(Filter.Value listValue, StringBuilder context) {
+		context.append(",");
 	}
 
 }

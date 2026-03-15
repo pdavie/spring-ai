@@ -33,20 +33,6 @@ public class IdolVectorStoreProperties extends CommonVectorStoreProperties {
 
 	private String vectorField = "embedding";
 
-	private int maxDocumentBatchSize = 1000;
-
-	private String aciHost = "localhost";
-
-	private int aciPort = 9000;
-
-	private String indexHost = "localhost";
-
-	private int indexPort = 9001;
-
-	private String communityHost = "localhost";
-
-	private int communityPort = 9030;
-
 	public String getDatabase() {
 		return this.database;
 	}
@@ -61,62 +47,6 @@ public class IdolVectorStoreProperties extends CommonVectorStoreProperties {
 
 	public void setVectorField(String vectorField) {
 		this.vectorField = vectorField;
-	}
-
-	public int getMaxDocumentBatchSize() {
-		return this.maxDocumentBatchSize;
-	}
-
-	public void setMaxDocumentBatchSize(int maxDocumentBatchSize) {
-		this.maxDocumentBatchSize = maxDocumentBatchSize;
-	}
-
-	public String getAciHost() {
-		return this.aciHost;
-	}
-
-	public void setAciHost(String aciHost) {
-		this.aciHost = aciHost;
-	}
-
-	public int getAciPort() {
-		return this.aciPort;
-	}
-
-	public void setAciPort(int aciPort) {
-		this.aciPort = aciPort;
-	}
-
-	public String getIndexHost() {
-		return this.indexHost;
-	}
-
-	public void setIndexHost(String indexHost) {
-		this.indexHost = indexHost;
-	}
-
-	public int getIndexPort() {
-		return this.indexPort;
-	}
-
-	public void setIndexPort(int indexPort) {
-		this.indexPort = indexPort;
-	}
-
-	public String getCommunityHost() {
-		return this.communityHost;
-	}
-
-	public void setCommunityHost(String communityHost) {
-		this.communityHost = communityHost;
-	}
-
-	public int getCommunityPort() {
-		return this.communityPort;
-	}
-
-	public void setCommunityPort(int communityPort) {
-		this.communityPort = communityPort;
 	}
 
 }

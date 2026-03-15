@@ -21,6 +21,7 @@ import io.micrometer.observation.ObservationRegistry;
 import org.springframework.ai.embedding.BatchingStrategy;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.embedding.TokenCountBatchingStrategy;
+import org.springframework.ai.vectorstore.SpringAIVectorStoreTypes;
 import org.springframework.ai.vectorstore.idol.IdolApi;
 import org.springframework.ai.vectorstore.idol.IdolVectorStore;
 import org.springframework.ai.vectorstore.observation.VectorStoreObservationConvention;
@@ -41,40 +42,17 @@ import org.springframework.util.StringUtils;
 @AutoConfiguration
 @ConditionalOnClass({ EmbeddingModel.class, IdolVectorStore.class })
 @EnableConfigurationProperties({ IdolApiProperties.class, IdolVectorStoreProperties.class })
-@ConditionalOnProperty(name = "spring.ai.vectorstore.type", havingValue = "idol", matchIfMissing = true)
+@ConditionalOnProperty(name = SpringAIVectorStoreTypes.TYPE, havingValue = SpringAIVectorStoreTypes.IDOL,
+		matchIfMissing = true)
 public class IdolVectorStoreAutoConfiguration {
 
 	@Bean
 	@ConditionalOnMissingBean
 	public IdolApi idolApi(IdolApiProperties apiProperties, IdolVectorStoreProperties storeProperties) {
 		String baseUrl = apiProperties.getUrl();
-		if (storeProperties.getAciHost() != null && !storeProperties.getAciHost().equals("localhost")
-				|| storeProperties.getAciPort() != 9000) {
-			baseUrl = "http://" + storeProperties.getAciHost() + ":" + storeProperties.getAciPort();
-		}
-
-		String indexBaseUrl = apiProperties.getIndexUrl();
-		if (!StringUtils.hasText(indexBaseUrl)) {
-			if (storeProperties.getIndexHost() != null && !storeProperties.getIndexHost().equals("localhost")
-					|| storeProperties.getIndexPort() != 9001) {
-				indexBaseUrl = "http://" + storeProperties.getIndexHost() + ":" + storeProperties.getIndexPort();
-			}
-			else {
-				indexBaseUrl = baseUrl;
-			}
-		}
-
-		String communityBaseUrl = apiProperties.getCommunityUrl();
-		if (!StringUtils.hasText(communityBaseUrl)) {
-			if (storeProperties.getCommunityHost() != null && !storeProperties.getCommunityHost().equals("localhost")
-					|| storeProperties.getCommunityPort() != 9030) {
-				communityBaseUrl = "http://" + storeProperties.getCommunityHost() + ":"
-						+ storeProperties.getCommunityPort();
-			}
-			else {
-				communityBaseUrl = baseUrl;
-			}
-		}
+		String indexBaseUrl = StringUtils.hasText(apiProperties.getIndexUrl()) ? apiProperties.getIndexUrl() : baseUrl;
+		String communityBaseUrl = StringUtils.hasText(apiProperties.getCommunityUrl()) ? apiProperties.getCommunityUrl()
+				: baseUrl;
 
 		return new IdolApi(baseUrl, indexBaseUrl, communityBaseUrl, storeProperties.getDatabase(),
 				storeProperties.getVectorField());
