@@ -842,6 +842,12 @@
 
 			<dependency>
 				<groupId>org.springframework.ai</groupId>
+				<artifactId>spring-ai-starter-vector-store-idol</artifactId>
+				<version>${project.version}</version>
+			</dependency>
+
+			<dependency>
+				<groupId>org.springframework.ai</groupId>
 				<artifactId>spring-ai-starter-vector-store-mariadb</artifactId>
 				<version>${project.version}</version>
 			</dependency>
