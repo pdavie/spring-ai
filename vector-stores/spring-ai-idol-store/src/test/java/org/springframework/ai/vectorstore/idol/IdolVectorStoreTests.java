@@ -1,0 +1,371 @@
+/*
+ * Copyright 2023-2024 the original author or authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.springframework.ai.vectorstore.idol;
+
+import java.util.List;
+import java.util.Map;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import reactor.core.publisher.Mono;
+
+import org.springframework.ai.document.Document;
+import org.springframework.ai.embedding.EmbeddingModel;
+import org.springframework.ai.vectorstore.SearchRequest;
+import org.springframework.ai.vectorstore.filter.Filter;
+import org.springframework.web.reactive.function.client.WebClient;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+/**
+ * Unit tests for {@link IdolVectorStore}.
+ *
+ * @author pdavie
+ */
+@ExtendWith(MockitoExtension.class)
+class IdolVectorStoreTests {
+
+	@Mock
+	private IdolApi idolApi;
+
+	@Mock
+	private EmbeddingModel embeddingModel;
+
+	@Mock
+	private WebClient.RequestBodyUriSpec requestBodyUriSpec;
+
+	@Mock
+	private WebClient.RequestBodySpec requestBodySpec;
+
+	@Mock
+	private WebClient.RequestHeadersUriSpec requestHeadersUriSpec;
+
+	@Mock
+	private WebClient.RequestHeadersSpec requestHeadersSpec;
+
+	@Mock
+	private WebClient.ResponseSpec responseSpec;
+
+	@Test
+	void addDocuments() {
+		when(this.idolApi.addDocument(any())).thenReturn(Mono.empty());
+		IdolVectorStore vectorStore = IdolVectorStore.builder(this.idolApi, this.embeddingModel).build();
+
+		Document doc = new Document("1", "content", Map.of("key", "value"));
+		when(this.embeddingModel.embed(any(List.class), any(), any())).thenReturn(List.of(new float[] { 0.1f, 0.2f }));
+
+		vectorStore.add(List.of(doc));
+
+		ArgumentCaptor<IdolApi.AddDocumentRequest> captor = ArgumentCaptor.forClass(IdolApi.AddDocumentRequest.class);
+		verify(this.idolApi).addDocument(captor.capture());
+
+		IdolApi.AddDocumentRequest request = captor.getValue();
+		assertThat(request.documents()).hasSize(1);
+		assertThat(request.documents().get(0).reference()).isEqualTo("1");
+		assertThat(request.documents().get(0).content()).isEqualTo("content");
+		assertThat(request.documents().get(0).metadata()).containsEntry("key", "value");
+	}
+
+	@Test
+	void testIdxFormatting() {
+		WebClient webClient = org.mockito.Mockito.mock(WebClient.class);
+		when(webClient.post()).thenReturn(this.requestBodyUriSpec);
+		when(this.requestBodyUriSpec.uri(any(java.util.function.Function.class))).thenReturn(this.requestBodySpec);
+		when(this.requestBodySpec.contentType(any())).thenReturn(this.requestBodySpec);
+		when(this.requestBodySpec.contentLength(any(Long.class))).thenReturn(this.requestBodySpec);
+		when(this.requestBodySpec.bodyValue(any())).thenReturn(this.requestHeadersSpec);
+		when(this.requestHeadersSpec.retrieve()).thenReturn(this.responseSpec);
+		when(this.responseSpec.bodyToMono(Void.class)).thenReturn(Mono.empty());
+
+		IdolApi api = new IdolApi(webClient, webClient, webClient, "testdb", "custom_vector_field");
+
+		IdolApi.IdolDocument doc = new IdolApi.IdolDocument("ref1", new float[] { 0.1f },
+				Map.of("meta1", "val1", "title", "Custom Title"), "content1");
+		api.addDocument(new IdolApi.AddDocumentRequest(List.of(doc))).block();
+
+		ArgumentCaptor<byte[]> bodyCaptor = ArgumentCaptor.forClass(byte[].class);
+		verify(this.requestBodySpec).bodyValue(bodyCaptor.capture());
+
+		String body = new String(bodyCaptor.getValue());
+		assertThat(body).contains("#DREREFERENCE ref1");
+		assertThat(body).contains("#DREFIELD meta1=\"val1\"");
+		assertThat(body).contains("#DREFIELD title=\"Custom Title\"");
+		assertThat(body).contains("#DREFIELD custom_vector_field=\"0.1\"");
+		assertThat(body).contains("#DRETITLE\nCustom Title");
+		assertThat(body).contains("#DRECONTENT\ncontent1");
+		assertThat(body).contains("#DREDBNAME testdb");
+		assertThat(body).contains("#DREENDDOC");
+		assertThat(body).contains("#DREENDDATAREFERENCE\r\n\r\n");
+
+		ArgumentCaptor<Long> lengthCaptor = ArgumentCaptor.forClass(Long.class);
+		verify(this.requestBodySpec).contentLength(lengthCaptor.capture());
+		assertThat(lengthCaptor.getValue()).isEqualTo((long) body.getBytes().length);
+	}
+
+	@Test
+	void similaritySearch() {
+		IdolVectorStore vectorStore = IdolVectorStore.builder(this.idolApi, this.embeddingModel).build();
+
+		when(this.embeddingModel.embed("query")).thenReturn(new float[] { 0.1f, 0.2f });
+
+		IdolApi.QueryResponse response = new IdolApi.QueryResponse(new IdolApi.AutnResponse(
+				new IdolApi.ResponseData(List.of(new IdolApi.Hit("123", "my-document-id", 0.9, new IdolApi.Content(
+						List.of(Map.of("DRECONTENT", List.of("content1"), "meta1", List.of("val1")))))))));
+
+		when(this.idolApi.query(any())).thenReturn(Mono.just(response));
+
+		List<Document> results = vectorStore.similaritySearch(SearchRequest.builder().query("query").topK(1).build());
+
+		assertThat(results).hasSize(1);
+		assertThat(results.get(0).getId()).isEqualTo("my-document-id");
+		assertThat(results.get(0).getText()).isEqualTo("content1");
+		assertThat(results.get(0).getMetadata()).containsEntry("meta1", "val1");
+
+		ArgumentCaptor<IdolApi.QueryRequest> captor = ArgumentCaptor.forClass(IdolApi.QueryRequest.class);
+		verify(this.idolApi).query(captor.capture());
+		assertThat(captor.getValue().text()).contains("VECTOR{0.1,0.2:0}:embedding");
+		assertThat(captor.getValue().print()).isEqualTo("None");
+	}
+
+	@Test
+	void similaritySearchWithPrintFields() {
+		IdolVectorStore vectorStore = IdolVectorStore.builder(this.idolApi, this.embeddingModel).build();
+
+		when(this.embeddingModel.embed("query")).thenReturn(new float[] { 0.1f, 0.2f });
+
+		IdolApi.QueryResponse response = new IdolApi.QueryResponse(
+				new IdolApi.AutnResponse(new IdolApi.ResponseData(List.of())));
+
+		when(this.idolApi.query(any())).thenReturn(Mono.just(response));
+
+		IdolSearchRequest searchRequest = IdolSearchRequest.idolBuilder()
+			.query("query")
+			.topK(1)
+			.print("PrintFields")
+			.printFields("meta1,meta2")
+			.build();
+
+		vectorStore.similaritySearch(searchRequest);
+
+		ArgumentCaptor<IdolApi.QueryRequest> captor = ArgumentCaptor.forClass(IdolApi.QueryRequest.class);
+		verify(this.idolApi).query(captor.capture());
+		assertThat(captor.getValue().print()).isEqualTo("PrintFields");
+		assertThat(captor.getValue().printFields()).isEqualTo("meta1,meta2");
+	}
+
+	@Test
+	void similaritySearchWithCustomVectorField() {
+		IdolVectorStore vectorStore = IdolVectorStore.builder(this.idolApi, this.embeddingModel)
+			.vectorField("store_vector_field")
+			.build();
+
+		when(this.embeddingModel.embed("query")).thenReturn(new float[] { 0.1f, 0.2f });
+
+		IdolApi.QueryResponse response = new IdolApi.QueryResponse(
+				new IdolApi.AutnResponse(new IdolApi.ResponseData(List.of())));
+
+		when(this.idolApi.query(any())).thenReturn(Mono.just(response));
+
+		// Test using store's default custom vector field
+		vectorStore.similaritySearch("query");
+
+		ArgumentCaptor<IdolApi.QueryRequest> captor = ArgumentCaptor.forClass(IdolApi.QueryRequest.class);
+		verify(this.idolApi).query(captor.capture());
+		assertThat(captor.getValue().text()).contains("VECTOR{0.1,0.2:0}:store_vector_field");
+		assertThat(captor.getValue().vectorField()).isEqualTo("store_vector_field");
+
+		// Test overriding vector field in request
+		IdolSearchRequest searchRequest = IdolSearchRequest.idolBuilder()
+			.query("query")
+			.vectorField("request_vector_field")
+			.build();
+
+		vectorStore.similaritySearch(searchRequest);
+
+		verify(this.idolApi, org.mockito.Mockito.atLeastOnce()).query(captor.capture());
+		assertThat(captor.getValue().text()).contains("VECTOR{0.1,0.2:0}:request_vector_field");
+		assertThat(captor.getValue().vectorField()).isEqualTo("request_vector_field");
+	}
+
+	@Test
+	void similaritySearchWithOptions() {
+		IdolVectorStoreOptions options = new IdolVectorStoreOptions();
+		options.setVectorField("options_vector_field");
+
+		IdolVectorStore vectorStore = IdolVectorStore.builder(this.idolApi, this.embeddingModel)
+			.options(options)
+			.build();
+
+		when(this.embeddingModel.embed("query")).thenReturn(new float[] { 0.1f, 0.2f });
+
+		IdolApi.QueryResponse response = new IdolApi.QueryResponse(
+				new IdolApi.AutnResponse(new IdolApi.ResponseData(List.of())));
+
+		when(this.idolApi.query(any())).thenReturn(Mono.just(response));
+
+		vectorStore.similaritySearch("query");
+
+		ArgumentCaptor<IdolApi.QueryRequest> captor = ArgumentCaptor.forClass(IdolApi.QueryRequest.class);
+		verify(this.idolApi).query(captor.capture());
+		assertThat(captor.getValue().text()).contains("VECTOR{0.1,0.2:0}:options_vector_field");
+	}
+
+	@Test
+	void similaritySearchWithSecurityInfo() {
+		IdolVectorStore vectorStore = IdolVectorStore.builder(this.idolApi, this.embeddingModel).build();
+
+		when(this.embeddingModel.embed("query")).thenReturn(new float[] { 0.1f, 0.2f });
+
+		IdolApi.QueryResponse response = new IdolApi.QueryResponse(new IdolApi.AutnResponse(
+				new IdolApi.ResponseData(List.of(new IdolApi.Hit("1", "ref1", 0.9, new IdolApi.Content(List.of()))))));
+
+		when(this.idolApi.query(any())).thenReturn(Mono.just(response));
+
+		Filter.Expression expression = new Filter.Expression(Filter.ExpressionType.EQ,
+				new Filter.Key(IdolVectorStore.METADATA_IDOL_USER), new Filter.Value("pdavie"));
+
+		vectorStore.similaritySearch(SearchRequest.builder().query("query").filterExpression(expression).build());
+
+		ArgumentCaptor<IdolApi.QueryRequest> captor = ArgumentCaptor.forClass(IdolApi.QueryRequest.class);
+		verify(this.idolApi).query(captor.capture());
+		assertThat(captor.getValue().username()).isEqualTo("pdavie");
+	}
+
+	@Test
+	void testGetSecurityInfo() {
+		WebClient webClient = org.mockito.Mockito.mock(WebClient.class);
+		WebClient communityWebClient = org.mockito.Mockito.mock(WebClient.class);
+		when(communityWebClient.get()).thenReturn(this.requestHeadersUriSpec);
+		when(this.requestHeadersUriSpec.uri(any(java.util.function.Function.class)))
+			.thenReturn(this.requestHeadersSpec);
+		when(this.requestHeadersSpec.retrieve()).thenReturn(this.responseSpec);
+
+		IdolApi.UserReadResponse response = new IdolApi.UserReadResponse(
+				new IdolApi.UserReadAutnResponse(new IdolApi.UserReadResponseData("test+token")));
+		when(this.responseSpec.bodyToMono(IdolApi.UserReadResponse.class)).thenReturn(Mono.just(response));
+
+		IdolApi api = new IdolApi(webClient, webClient, communityWebClient, "testdb", "embedding");
+
+		String token = api.getSecurityInfo("pdavie").block();
+
+		assertThat(token).isEqualTo("test+token");
+	}
+
+	@Test
+	void testQueryWithSecurityInfo() {
+		WebClient webClient = org.mockito.Mockito.mock(WebClient.class);
+		WebClient communityWebClient = org.mockito.Mockito.mock(WebClient.class);
+
+		when(webClient.get()).thenReturn(this.requestHeadersUriSpec);
+		when(this.requestHeadersUriSpec.uri(any(java.util.function.Function.class)))
+			.thenReturn(this.requestHeadersSpec);
+		when(this.requestHeadersSpec.retrieve()).thenReturn(this.responseSpec);
+		when(this.responseSpec.bodyToMono(IdolApi.QueryResponse.class)).thenReturn(Mono.empty());
+
+		// Mock community client for security info
+		WebClient.RequestHeadersUriSpec communityHeadersUriSpec = org.mockito.Mockito
+			.mock(WebClient.RequestHeadersUriSpec.class);
+		WebClient.RequestHeadersSpec communityHeadersSpec = org.mockito.Mockito
+			.mock(WebClient.RequestHeadersSpec.class);
+		WebClient.ResponseSpec communityResponseSpec = org.mockito.Mockito.mock(WebClient.ResponseSpec.class);
+
+		when(communityWebClient.get()).thenReturn(communityHeadersUriSpec);
+		when(communityHeadersUriSpec.uri(any(java.util.function.Function.class))).thenReturn(communityHeadersSpec);
+		when(communityHeadersSpec.retrieve()).thenReturn(communityResponseSpec);
+		when(communityResponseSpec.bodyToMono(IdolApi.UserReadResponse.class))
+			.thenReturn(Mono.just(new IdolApi.UserReadResponse(
+					new IdolApi.UserReadAutnResponse(new IdolApi.UserReadResponseData("test+token")))));
+
+		IdolApi api = new IdolApi(webClient, webClient, communityWebClient, "testdb", "embedding");
+
+		IdolApi.QueryRequest request = new IdolApi.QueryRequest("text", "fieldText", 10, "pdavie", null, null,
+				"embedding");
+		api.query(request).block();
+
+		ArgumentCaptor<java.util.function.Function<org.springframework.web.util.UriBuilder, java.net.URI>> uriCaptor = ArgumentCaptor
+			.forClass(java.util.function.Function.class);
+		verify(this.requestHeadersUriSpec).uri(uriCaptor.capture());
+
+		org.springframework.web.util.UriBuilder uriBuilder = org.springframework.web.util.UriComponentsBuilder
+			.fromPath("/");
+		uriCaptor.getValue().apply(uriBuilder);
+		java.net.URI uri = uriBuilder.build();
+
+		// Spring's UriBuilder encodes the manually encoded string again.
+		// test+token -> test%2Btoken -> test%252Btoken
+		assertThat(uri.toString()).contains("SecurityInfo=test%252Btoken");
+	}
+
+	@Test
+	void similaritySearchWithFilter() {
+		IdolVectorStore vectorStore = IdolVectorStore.builder(this.idolApi, this.embeddingModel).build();
+
+		when(this.embeddingModel.embed("query")).thenReturn(new float[] { 0.1f, 0.2f });
+		when(this.idolApi.query(any())).thenReturn(Mono.empty());
+
+		Filter.Expression expression = new Filter.Expression(Filter.ExpressionType.EQ, new Filter.Key("genre"),
+				new Filter.Value("drama"));
+
+		vectorStore.similaritySearch(SearchRequest.builder().query("query").filterExpression(expression).build());
+
+		ArgumentCaptor<IdolApi.QueryRequest> captor = ArgumentCaptor.forClass(IdolApi.QueryRequest.class);
+		verify(this.idolApi).query(captor.capture());
+		assertThat(captor.getValue().fieldText()).isEqualTo("MATCH{drama}:genre");
+	}
+
+	@Test
+	void deleteDocuments() {
+		when(this.idolApi.delete(any())).thenReturn(Mono.empty());
+		IdolVectorStore vectorStore = IdolVectorStore.builder(this.idolApi, this.embeddingModel).build();
+
+		vectorStore.delete(List.of("1", "2"));
+
+		verify(this.idolApi).delete(List.of("1", "2"));
+	}
+
+	@Test
+	void testDeleteRequest() {
+		WebClient webClient = org.mockito.Mockito.mock(WebClient.class);
+		when(webClient.get()).thenReturn(this.requestHeadersUriSpec);
+		when(this.requestHeadersUriSpec.uri(any(java.util.function.Function.class)))
+			.thenReturn(this.requestHeadersSpec);
+		when(this.requestHeadersSpec.retrieve()).thenReturn(this.responseSpec);
+		when(this.responseSpec.bodyToMono(Void.class)).thenReturn(Mono.empty());
+
+		IdolApi api = new IdolApi(webClient, webClient, webClient, "testdb", "embedding");
+		api.delete(List.of("ref 1", "ref+2")).block();
+
+		ArgumentCaptor<java.util.function.Function<org.springframework.web.util.UriBuilder, java.net.URI>> uriCaptor = ArgumentCaptor
+			.forClass(java.util.function.Function.class);
+		verify(this.requestHeadersUriSpec).uri(uriCaptor.capture());
+
+		org.springframework.web.util.UriBuilder uriBuilder = org.springframework.web.util.UriComponentsBuilder
+			.fromPath("/");
+		java.net.URI uri = uriCaptor.getValue().apply(uriBuilder);
+
+		assertThat(uri.toString()).contains("DREDELETEREF");
+		assertThat(uri.toString()).contains("Docs=ref+1+ref%2B2");
+		assertThat(uri.toString()).contains("DREDbName=testdb");
+	}
+
+}
