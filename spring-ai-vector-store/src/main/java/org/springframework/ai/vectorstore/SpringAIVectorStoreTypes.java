@@ -40,6 +40,8 @@ public final class SpringAIVectorStoreTypes {
 
 	public static final String HANADB = "hanadb";
 
+	public static final String IDOL = "idol";
+
 	public static final String MARIADB = "mariadb";
 
 	public static final String MILVUS = "milvus";
@@ -59,6 +61,8 @@ public final class SpringAIVectorStoreTypes {
 	public static final String QDRANT = "qdrant";
 
 	public static final String REDIS = "redis";
+
+	public static final String SOLR = "solr";
 
 	public static final String TYPESENSE = "typesense";
 

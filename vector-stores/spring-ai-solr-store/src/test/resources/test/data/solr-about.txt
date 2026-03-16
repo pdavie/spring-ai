@@ -1,0 +1,4 @@
+Apache Solr is an open-source search platform built on Apache Lucene. 
+It is written in Java and runs as a standalone full-text search server. 
+Solr includes a REST-like API for indexing and querying, and it provides features such as faceted search, near real-time indexing, and distributed search.
+Solr is highly scalable, providing fault tolerance and high availability.
