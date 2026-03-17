@@ -30,6 +30,17 @@ import org.springframework.ai.document.Document;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.filter.Filter;
+import org.springframework.ai.vectorstore.idol.api.AddDocumentRequest;
+import org.springframework.ai.vectorstore.idol.api.AutnResponse;
+import org.springframework.ai.vectorstore.idol.api.Content;
+import org.springframework.ai.vectorstore.idol.api.Hit;
+import org.springframework.ai.vectorstore.idol.api.IdolDocument;
+import org.springframework.ai.vectorstore.idol.api.QueryRequest;
+import org.springframework.ai.vectorstore.idol.api.QueryResponse;
+import org.springframework.ai.vectorstore.idol.api.ResponseData;
+import org.springframework.ai.vectorstore.idol.api.UserReadAutnResponse;
+import org.springframework.ai.vectorstore.idol.api.UserReadResponse;
+import org.springframework.ai.vectorstore.idol.api.UserReadResponseData;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -76,10 +87,10 @@ class IdolVectorStoreTests {
 
 		vectorStore.add(List.of(doc));
 
-		ArgumentCaptor<IdolApi.AddDocumentRequest> captor = ArgumentCaptor.forClass(IdolApi.AddDocumentRequest.class);
+		ArgumentCaptor<AddDocumentRequest> captor = ArgumentCaptor.forClass(AddDocumentRequest.class);
 		verify(this.idolApi).addDocument(captor.capture());
 
-		IdolApi.AddDocumentRequest request = captor.getValue();
+		AddDocumentRequest request = captor.getValue();
 		assertThat(request.documents()).hasSize(1);
 		assertThat(request.documents().get(0).reference()).isEqualTo("1");
 		assertThat(request.documents().get(0).content()).isEqualTo("content");
@@ -99,9 +110,9 @@ class IdolVectorStoreTests {
 
 		IdolApi api = new IdolApi(webClient, webClient, webClient, "testdb", "custom_vector_field");
 
-		IdolApi.IdolDocument doc = new IdolApi.IdolDocument("ref1", new float[] { 0.1f },
+		IdolDocument doc = new IdolDocument("ref1", new float[] { 0.1f },
 				Map.of("meta1", "val1", "title", "Custom Title"), "content1");
-		api.addDocument(new IdolApi.AddDocumentRequest(List.of(doc))).block();
+		api.addDocument(new AddDocumentRequest(List.of(doc), null)).block();
 
 		ArgumentCaptor<byte[]> bodyCaptor = ArgumentCaptor.forClass(byte[].class);
 		verify(this.requestBodySpec).bodyValue(bodyCaptor.capture());
@@ -128,9 +139,10 @@ class IdolVectorStoreTests {
 
 		when(this.embeddingModel.embed("query")).thenReturn(new float[] { 0.1f, 0.2f });
 
-		IdolApi.QueryResponse response = new IdolApi.QueryResponse(new IdolApi.AutnResponse(
-				new IdolApi.ResponseData(List.of(new IdolApi.Hit("123", "my-document-id", 0.9, new IdolApi.Content(
-						List.of(Map.of("DRECONTENT", List.of("content1"), "meta1", List.of("val1")))))))));
+		QueryResponse response = new QueryResponse(new AutnResponse(ResponseData.builder()
+			.hits(List.of(new Hit("123", "my-document-id", 0.9,
+					new Content(Map.of("DRECONTENT", List.of("content1"), "meta1", List.of("val1"))))))
+			.build()));
 
 		when(this.idolApi.query(any())).thenReturn(Mono.just(response));
 
@@ -141,9 +153,9 @@ class IdolVectorStoreTests {
 		assertThat(results.get(0).getText()).isEqualTo("content1");
 		assertThat(results.get(0).getMetadata()).containsEntry("meta1", "val1");
 
-		ArgumentCaptor<IdolApi.QueryRequest> captor = ArgumentCaptor.forClass(IdolApi.QueryRequest.class);
+		ArgumentCaptor<QueryRequest> captor = ArgumentCaptor.forClass(QueryRequest.class);
 		verify(this.idolApi).query(captor.capture());
-		assertThat(captor.getValue().text()).contains("VECTOR{0.1,0.2:0}:embedding");
+		assertThat(captor.getValue().text()).contains("VECTOR{0.1,0.2:0}:Vector");
 		assertThat(captor.getValue().print()).isEqualTo("None");
 	}
 
@@ -153,8 +165,7 @@ class IdolVectorStoreTests {
 
 		when(this.embeddingModel.embed("query")).thenReturn(new float[] { 0.1f, 0.2f });
 
-		IdolApi.QueryResponse response = new IdolApi.QueryResponse(
-				new IdolApi.AutnResponse(new IdolApi.ResponseData(List.of())));
+		QueryResponse response = new QueryResponse(new AutnResponse(ResponseData.builder().hits(List.of()).build()));
 
 		when(this.idolApi.query(any())).thenReturn(Mono.just(response));
 
@@ -167,7 +178,7 @@ class IdolVectorStoreTests {
 
 		vectorStore.similaritySearch(searchRequest);
 
-		ArgumentCaptor<IdolApi.QueryRequest> captor = ArgumentCaptor.forClass(IdolApi.QueryRequest.class);
+		ArgumentCaptor<QueryRequest> captor = ArgumentCaptor.forClass(QueryRequest.class);
 		verify(this.idolApi).query(captor.capture());
 		assertThat(captor.getValue().print()).isEqualTo("PrintFields");
 		assertThat(captor.getValue().printFields()).isEqualTo("meta1,meta2");
@@ -181,15 +192,14 @@ class IdolVectorStoreTests {
 
 		when(this.embeddingModel.embed("query")).thenReturn(new float[] { 0.1f, 0.2f });
 
-		IdolApi.QueryResponse response = new IdolApi.QueryResponse(
-				new IdolApi.AutnResponse(new IdolApi.ResponseData(List.of())));
+		QueryResponse response = new QueryResponse(new AutnResponse(ResponseData.builder().hits(List.of()).build()));
 
 		when(this.idolApi.query(any())).thenReturn(Mono.just(response));
 
 		// Test using store's default custom vector field
 		vectorStore.similaritySearch("query");
 
-		ArgumentCaptor<IdolApi.QueryRequest> captor = ArgumentCaptor.forClass(IdolApi.QueryRequest.class);
+		ArgumentCaptor<QueryRequest> captor = ArgumentCaptor.forClass(QueryRequest.class);
 		verify(this.idolApi).query(captor.capture());
 		assertThat(captor.getValue().text()).contains("VECTOR{0.1,0.2:0}:store_vector_field");
 		assertThat(captor.getValue().vectorField()).isEqualTo("store_vector_field");
@@ -218,14 +228,13 @@ class IdolVectorStoreTests {
 
 		when(this.embeddingModel.embed("query")).thenReturn(new float[] { 0.1f, 0.2f });
 
-		IdolApi.QueryResponse response = new IdolApi.QueryResponse(
-				new IdolApi.AutnResponse(new IdolApi.ResponseData(List.of())));
+		QueryResponse response = new QueryResponse(new AutnResponse(ResponseData.builder().hits(List.of()).build()));
 
 		when(this.idolApi.query(any())).thenReturn(Mono.just(response));
 
 		vectorStore.similaritySearch("query");
 
-		ArgumentCaptor<IdolApi.QueryRequest> captor = ArgumentCaptor.forClass(IdolApi.QueryRequest.class);
+		ArgumentCaptor<QueryRequest> captor = ArgumentCaptor.forClass(QueryRequest.class);
 		verify(this.idolApi).query(captor.capture());
 		assertThat(captor.getValue().text()).contains("VECTOR{0.1,0.2:0}:options_vector_field");
 	}
@@ -236,8 +245,8 @@ class IdolVectorStoreTests {
 
 		when(this.embeddingModel.embed("query")).thenReturn(new float[] { 0.1f, 0.2f });
 
-		IdolApi.QueryResponse response = new IdolApi.QueryResponse(new IdolApi.AutnResponse(
-				new IdolApi.ResponseData(List.of(new IdolApi.Hit("1", "ref1", 0.9, new IdolApi.Content(List.of()))))));
+		QueryResponse response = new QueryResponse(new AutnResponse(
+				ResponseData.builder().hits(List.of(new Hit("ref1", "1", 0.9, new Content(Map.of())))).build()));
 
 		when(this.idolApi.query(any())).thenReturn(Mono.just(response));
 
@@ -246,7 +255,7 @@ class IdolVectorStoreTests {
 
 		vectorStore.similaritySearch(SearchRequest.builder().query("query").filterExpression(expression).build());
 
-		ArgumentCaptor<IdolApi.QueryRequest> captor = ArgumentCaptor.forClass(IdolApi.QueryRequest.class);
+		ArgumentCaptor<QueryRequest> captor = ArgumentCaptor.forClass(QueryRequest.class);
 		verify(this.idolApi).query(captor.capture());
 		assertThat(captor.getValue().username()).isEqualTo("pdavie");
 	}
@@ -260,9 +269,9 @@ class IdolVectorStoreTests {
 			.thenReturn(this.requestHeadersSpec);
 		when(this.requestHeadersSpec.retrieve()).thenReturn(this.responseSpec);
 
-		IdolApi.UserReadResponse response = new IdolApi.UserReadResponse(
-				new IdolApi.UserReadAutnResponse(new IdolApi.UserReadResponseData("test+token")));
-		when(this.responseSpec.bodyToMono(IdolApi.UserReadResponse.class)).thenReturn(Mono.just(response));
+		UserReadResponse response = new UserReadResponse(
+				new UserReadAutnResponse(new UserReadResponseData("test+token")));
+		when(this.responseSpec.bodyToMono(UserReadResponse.class)).thenReturn(Mono.just(response));
 
 		IdolApi api = new IdolApi(webClient, webClient, communityWebClient, "testdb", "embedding");
 
@@ -280,7 +289,7 @@ class IdolVectorStoreTests {
 		when(this.requestHeadersUriSpec.uri(any(java.util.function.Function.class)))
 			.thenReturn(this.requestHeadersSpec);
 		when(this.requestHeadersSpec.retrieve()).thenReturn(this.responseSpec);
-		when(this.responseSpec.bodyToMono(IdolApi.QueryResponse.class)).thenReturn(Mono.empty());
+		when(this.responseSpec.bodyToMono(QueryResponse.class)).thenReturn(Mono.empty());
 
 		// Mock community client for security info
 		WebClient.RequestHeadersUriSpec communityHeadersUriSpec = org.mockito.Mockito
@@ -292,14 +301,18 @@ class IdolVectorStoreTests {
 		when(communityWebClient.get()).thenReturn(communityHeadersUriSpec);
 		when(communityHeadersUriSpec.uri(any(java.util.function.Function.class))).thenReturn(communityHeadersSpec);
 		when(communityHeadersSpec.retrieve()).thenReturn(communityResponseSpec);
-		when(communityResponseSpec.bodyToMono(IdolApi.UserReadResponse.class))
-			.thenReturn(Mono.just(new IdolApi.UserReadResponse(
-					new IdolApi.UserReadAutnResponse(new IdolApi.UserReadResponseData("test+token")))));
+		when(communityResponseSpec.bodyToMono(UserReadResponse.class)).thenReturn(
+				Mono.just(new UserReadResponse(new UserReadAutnResponse(new UserReadResponseData("test+token")))));
 
 		IdolApi api = new IdolApi(webClient, webClient, communityWebClient, "testdb", "embedding");
 
-		IdolApi.QueryRequest request = new IdolApi.QueryRequest("text", "fieldText", 10, "pdavie", null, null,
-				"embedding");
+		QueryRequest request = QueryRequest.builder()
+			.text("text")
+			.fieldText("fieldText")
+			.maxResults(10)
+			.username("pdavie")
+			.vectorField("embedding")
+			.build();
 		api.query(request).block();
 
 		ArgumentCaptor<java.util.function.Function<org.springframework.web.util.UriBuilder, java.net.URI>> uriCaptor = ArgumentCaptor
@@ -308,8 +321,7 @@ class IdolVectorStoreTests {
 
 		org.springframework.web.util.UriBuilder uriBuilder = org.springframework.web.util.UriComponentsBuilder
 			.fromPath("/");
-		uriCaptor.getValue().apply(uriBuilder);
-		java.net.URI uri = uriBuilder.build();
+		java.net.URI uri = uriCaptor.getValue().apply(uriBuilder);
 
 		// Spring's UriBuilder encodes the manually encoded string again.
 		// test+token -> test%2Btoken -> test%252Btoken
@@ -328,9 +340,79 @@ class IdolVectorStoreTests {
 
 		vectorStore.similaritySearch(SearchRequest.builder().query("query").filterExpression(expression).build());
 
-		ArgumentCaptor<IdolApi.QueryRequest> captor = ArgumentCaptor.forClass(IdolApi.QueryRequest.class);
+		ArgumentCaptor<QueryRequest> captor = ArgumentCaptor.forClass(QueryRequest.class);
 		verify(this.idolApi).query(captor.capture());
 		assertThat(captor.getValue().fieldText()).isEqualTo("MATCH{drama}:genre");
+	}
+
+	@Test
+	void deleteDocumentsByFilter() {
+		IdolVectorStore vectorStore = IdolVectorStore.builder(this.idolApi, this.embeddingModel).build();
+
+		Filter.Expression expression = new Filter.Expression(Filter.ExpressionType.EQ, new Filter.Key("genre"),
+				new Filter.Value("drama"));
+
+		QueryResponse response = new QueryResponse(
+				new AutnResponse(ResponseData.builder().state("state-token-123").build()));
+		when(this.idolApi.query(any())).thenReturn(Mono.just(response));
+		when(this.idolApi.deleteByState("state-token-123")).thenReturn(Mono.empty());
+
+		vectorStore.delete(expression);
+
+		ArgumentCaptor<QueryRequest> queryCaptor = ArgumentCaptor.forClass(QueryRequest.class);
+		verify(this.idolApi).query(queryCaptor.capture());
+		assertThat(queryCaptor.getValue().saveState()).isTrue();
+		assertThat(queryCaptor.getValue().fieldText()).isEqualTo("MATCH{drama}:genre");
+
+		verify(this.idolApi).deleteByState("state-token-123");
+	}
+
+	@Test
+	void testDeleteByStateRequest() {
+		WebClient webClient = org.mockito.Mockito.mock(WebClient.class);
+		when(webClient.get()).thenReturn(this.requestHeadersUriSpec);
+		when(this.requestHeadersUriSpec.uri(any(java.util.function.Function.class)))
+			.thenReturn(this.requestHeadersSpec);
+		when(this.requestHeadersSpec.retrieve()).thenReturn(this.responseSpec);
+		when(this.responseSpec.bodyToMono(Void.class)).thenReturn(Mono.empty());
+
+		IdolApi api = new IdolApi(webClient, webClient, webClient, "testdb", "embedding");
+		api.deleteByState("state-token-abc").block();
+
+		ArgumentCaptor<java.util.function.Function<org.springframework.web.util.UriBuilder, java.net.URI>> uriCaptor = ArgumentCaptor
+			.forClass(java.util.function.Function.class);
+		verify(this.requestHeadersUriSpec).uri(uriCaptor.capture());
+
+		org.springframework.web.util.UriBuilder uriBuilder = org.springframework.web.util.UriComponentsBuilder
+			.fromPath("/");
+		java.net.URI uri = uriCaptor.getValue().apply(uriBuilder);
+
+		assertThat(uri.toString()).contains("DREDELETEDOC");
+		assertThat(uri.toString()).contains("StateId=state-token-abc");
+	}
+
+	@Test
+	void testQueryWithSaveState() {
+		WebClient webClient = org.mockito.Mockito.mock(WebClient.class);
+		when(webClient.get()).thenReturn(this.requestHeadersUriSpec);
+		when(this.requestHeadersUriSpec.uri(any(java.util.function.Function.class)))
+			.thenReturn(this.requestHeadersSpec);
+		when(this.requestHeadersSpec.retrieve()).thenReturn(this.responseSpec);
+		when(this.responseSpec.bodyToMono(QueryResponse.class)).thenReturn(Mono.empty());
+
+		IdolApi api = new IdolApi(webClient, webClient, webClient, "testdb", "embedding");
+		QueryRequest request = QueryRequest.builder().text("*").saveState(true).build();
+		api.query(request).block();
+
+		ArgumentCaptor<java.util.function.Function<org.springframework.web.util.UriBuilder, java.net.URI>> uriCaptor = ArgumentCaptor
+			.forClass(java.util.function.Function.class);
+		verify(this.requestHeadersUriSpec).uri(uriCaptor.capture());
+
+		org.springframework.web.util.UriBuilder uriBuilder = org.springframework.web.util.UriComponentsBuilder
+			.fromPath("/");
+		java.net.URI uri = uriCaptor.getValue().apply(uriBuilder);
+
+		assertThat(uri.toString()).contains("SaveState=True");
 	}
 
 	@Test
@@ -366,6 +448,114 @@ class IdolVectorStoreTests {
 		assertThat(uri.toString()).contains("DREDELETEREF");
 		assertThat(uri.toString()).contains("Docs=ref+1+ref%2B2");
 		assertThat(uri.toString()).contains("DREDbName=testdb");
+	}
+
+	@Test
+	void testSeparateClients() {
+		WebClient aciClient = org.mockito.Mockito.mock(WebClient.class);
+		WebClient indexClient = org.mockito.Mockito.mock(WebClient.class);
+		WebClient communityClient = org.mockito.Mockito.mock(WebClient.class);
+
+		when(aciClient.get()).thenReturn(this.requestHeadersUriSpec);
+		when(this.requestHeadersUriSpec.uri(any(java.util.function.Function.class)))
+			.thenReturn(this.requestHeadersSpec);
+		when(this.requestHeadersSpec.retrieve()).thenReturn(this.responseSpec);
+		when(this.responseSpec.bodyToMono(QueryResponse.class)).thenReturn(Mono.empty());
+
+		when(indexClient.post()).thenReturn(this.requestBodyUriSpec);
+		when(this.requestBodyUriSpec.uri(any(java.util.function.Function.class))).thenReturn(this.requestBodySpec);
+		when(this.requestBodySpec.contentType(any())).thenReturn(this.requestBodySpec);
+		when(this.requestBodySpec.contentLength(any(Long.class))).thenReturn(this.requestBodySpec);
+		when(this.requestBodySpec.bodyValue(any())).thenReturn(this.requestHeadersSpec);
+		when(this.requestHeadersSpec.retrieve()).thenReturn(this.responseSpec);
+		when(this.responseSpec.bodyToMono(Void.class)).thenReturn(Mono.empty());
+
+		IdolApi api = new IdolApi(aciClient, indexClient, communityClient, "testdb", "embedding");
+
+		// ACI operation should use aciClient
+		api.query(org.springframework.ai.vectorstore.idol.api.QueryRequest.builder().text("test").maxResults(1).build())
+			.block();
+		verify(aciClient).get();
+		org.mockito.Mockito.verifyNoInteractions(indexClient);
+
+		// Index operation should use indexClient
+		api.addDocument(new org.springframework.ai.vectorstore.idol.api.AddDocumentRequest(
+				List.of(new IdolDocument("1", null, null, "text")), null))
+			.block();
+		verify(indexClient).post();
+	}
+
+	@Test
+	void testTextEncoding() {
+		WebClient webClient = org.mockito.Mockito.mock(WebClient.class);
+		when(webClient.get()).thenReturn(this.requestHeadersUriSpec);
+		when(this.requestHeadersUriSpec.uri(any(java.util.function.Function.class)))
+			.thenReturn(this.requestHeadersSpec);
+		when(this.requestHeadersSpec.retrieve()).thenReturn(this.responseSpec);
+		when(this.responseSpec.bodyToMono(QueryResponse.class)).thenReturn(Mono.empty());
+
+		IdolApi api = new IdolApi(webClient, webClient, webClient, "testdb", "embedding");
+		QueryRequest request = QueryRequest.builder().text("four,five,six").build();
+		api.query(request).block();
+
+		ArgumentCaptor<java.util.function.Function<org.springframework.web.util.UriBuilder, java.net.URI>> uriCaptor = ArgumentCaptor
+			.forClass(java.util.function.Function.class);
+		verify(this.requestHeadersUriSpec).uri(uriCaptor.capture());
+
+		org.springframework.web.util.UriBuilder uriBuilder = org.springframework.web.util.UriComponentsBuilder
+			.fromPath("/");
+		java.net.URI uri = uriCaptor.getValue().apply(uriBuilder);
+
+		// four,five,six -> four,five,six (Standard transport-level encoding often leaves
+		// commas)
+		assertThat(uri.toString()).contains("Text=four,five,six");
+	}
+
+	@Test
+	void testFieldTextEncoding() {
+		WebClient webClient = org.mockito.Mockito.mock(WebClient.class);
+		when(webClient.get()).thenReturn(this.requestHeadersUriSpec);
+		when(this.requestHeadersUriSpec.uri(any(java.util.function.Function.class)))
+			.thenReturn(this.requestHeadersSpec);
+		when(this.requestHeadersSpec.retrieve()).thenReturn(this.responseSpec);
+		when(this.responseSpec.bodyToMono(QueryResponse.class)).thenReturn(Mono.empty());
+
+		IdolApi api = new IdolApi(webClient, webClient, webClient, "testdb", "embedding");
+		// FieldText values are encoded by IdolFilterExpressionConverter at application
+		// level
+		String encodedFieldText = "MATCH{four%2Cfive%2Csix}:MyField";
+		QueryRequest request = QueryRequest.builder().text("*").fieldText(encodedFieldText).build();
+		api.query(request).block();
+
+		ArgumentCaptor<java.util.function.Function<org.springframework.web.util.UriBuilder, java.net.URI>> uriCaptor = ArgumentCaptor
+			.forClass(java.util.function.Function.class);
+		verify(this.requestHeadersUriSpec).uri(uriCaptor.capture());
+
+		org.springframework.web.util.UriBuilder uriBuilder = org.springframework.web.util.UriComponentsBuilder
+			.fromPath("/");
+		java.net.URI uri = uriCaptor.getValue().apply(uriBuilder);
+
+		// MATCH{four%2Cfive%2Csix}:MyField -> MATCH%7Bfour%252Cfive%252Csix%7D%3AMyField
+		// (Double encoding for the comma: , -> %2C -> %252C)
+		assertThat(uri.toString()).contains("FieldText=MATCH%7Bfour%252Cfive%252Csix%7D:MyField");
+	}
+
+	@Test
+	void similaritySearchWithEncoding() {
+		IdolVectorStore vectorStore = IdolVectorStore.builder(this.idolApi, this.embeddingModel).build();
+
+		when(this.embeddingModel.embed("query")).thenReturn(new float[] { 0.1f, 0.2f });
+		when(this.idolApi.query(any())).thenReturn(Mono.empty());
+
+		Filter.Expression expression = new Filter.Expression(Filter.ExpressionType.EQ, new Filter.Key("genre"),
+				new Filter.Value("four,five,six"));
+
+		vectorStore.similaritySearch(SearchRequest.builder().query("query").filterExpression(expression).build());
+
+		ArgumentCaptor<QueryRequest> captor = ArgumentCaptor.forClass(QueryRequest.class);
+		verify(this.idolApi).query(captor.capture());
+		// The converter should have encoded the value
+		assertThat(captor.getValue().fieldText()).isEqualTo("MATCH{four%2Cfive%2Csix}:genre");
 	}
 
 }

@@ -71,6 +71,11 @@ public enum VectorStoreProvider {
 	HANA("hana"),
 
 	/**
+	 * Vector store provided by OpenText IDOL.
+	 */
+	IDOL("idol"),
+
+	/**
 	 * Vector store provided by MariaDB.
 	 */
 	MARIADB("mariadb"),
@@ -124,11 +129,6 @@ public enum VectorStoreProvider {
 	 * Vector store provided by simple.
 	 */
 	SIMPLE("simple"),
-
-	/**
-	 * Vector store provided by Apache Solr.
-	 */
-	SOLR("solr"),
 
 	/**
 	 * Vector store provided by Typesense.
