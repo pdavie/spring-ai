@@ -23,13 +23,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.annotation.JsonProperty;
 import reactor.core.publisher.Mono;
 
+import org.springframework.ai.vectorstore.idol.api.AddDocumentRequest;
+import org.springframework.ai.vectorstore.idol.api.IdolDocument;
+import org.springframework.ai.vectorstore.idol.api.QueryRequest;
+import org.springframework.ai.vectorstore.idol.api.QueryResponse;
+import org.springframework.ai.vectorstore.idol.api.UserReadResponse;
 import org.springframework.http.MediaType;
 import org.springframework.util.Assert;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.util.UriComponentsBuilder;
 
 /**
  * Client for OpenText IDOL ACI actions.
@@ -56,7 +60,7 @@ public class IdolApi {
 		this(baseUrl, baseUrl, baseUrl, database, vectorField);
 	}
 
-	public IdolApi(String baseUrl, String indexBaseUrl, String communityBaseUrl, String database) {
+	public IdolApi(String baseUrl, String indexBaseUrl, String communityBaseUrl, final String database) {
 		this(baseUrl, indexBaseUrl, communityBaseUrl, database, IdolVectorStore.DEFAULT_VECTOR_FIELD);
 	}
 
@@ -69,7 +73,7 @@ public class IdolApi {
 		this(webClient, webClient, webClient, database, IdolVectorStore.DEFAULT_VECTOR_FIELD);
 	}
 
-	public IdolApi(WebClient webClient, WebClient indexWebClient, WebClient communityWebClient, String database) {
+	public IdolApi(WebClient webClient, WebClient indexWebClient, WebClient communityWebClient, final String database) {
 		this(webClient, indexWebClient, communityWebClient, database, IdolVectorStore.DEFAULT_VECTOR_FIELD);
 	}
 
@@ -87,60 +91,89 @@ public class IdolApi {
 		this.vectorField = vectorField;
 	}
 
+	/**
+	 * Perform a similarity query against IDOL.
+	 * @param request the query request
+	 * @return the query response
+	 */
 	public Mono<QueryResponse> query(QueryRequest request) {
 		Mono<String> securityInfoMono = Mono.justOrEmpty(request.username())
 			.flatMap(this::getSecurityInfo)
 			.defaultIfEmpty("");
 
-		return securityInfoMono.flatMap(securityInfo -> this.webClient.get().uri(uriBuilder -> {
-			uriBuilder.path("/")
-				.queryParam("action", "Query")
-				.queryParam("Text", request.text())
-				.queryParam("FieldText", request.fieldText())
-				.queryParam("MaxResults", request.maxResults())
-				.queryParam("TotalResults", "True")
-				.queryParam("ResponseFormat", "JSON");
+		return securityInfoMono.flatMap(securityInfo -> {
+			WebClient client = this.webClient;
+			return client.get().uri(ignored -> {
+				UriComponentsBuilder componentsBuilder = UriComponentsBuilder.fromPath("/")
+					.queryParam("action", "Query")
+					.queryParam("Text", request.text())
+					.queryParam("FieldText", request.fieldText())
+					.queryParam("MaxResults", request.maxResults())
+					.queryParam("TotalResults", "True")
+					.queryParam("ResponseFormat", "SimpleJson");
 
-			if (securityInfo != null && !securityInfo.isEmpty()) {
-				String encoded = URLEncoder.encode(securityInfo, StandardCharsets.UTF_8).replace("+", "%2B");
-				uriBuilder.queryParam("SecurityInfo", encoded);
-			}
+				if (securityInfo != null && !securityInfo.isEmpty()) {
+					try {
+						String encoded = URLEncoder.encode(securityInfo, StandardCharsets.UTF_8.name())
+							.replace("+", "%2B");
+						componentsBuilder.queryParam("SecurityInfo", encoded);
+					}
+					catch (Exception e) {
+						throw new RuntimeException(e);
+					}
+				}
 
-			if (request.print() != null) {
-				uriBuilder.queryParam("Print", request.print());
-			}
+				if (request.print() != null) {
+					componentsBuilder.queryParam("Print", request.print());
+				}
 
-			if (request.printFields() != null) {
-				uriBuilder.queryParam("PrintFields", request.printFields());
-			}
+				if (request.printFields() != null) {
+					componentsBuilder.queryParam("PrintFields", request.printFields());
+				}
 
-			return uriBuilder.build();
-		}).retrieve().bodyToMono(QueryResponse.class));
+				if (request.saveState() != null && request.saveState()) {
+					componentsBuilder.queryParam("SaveState", "True");
+				}
+
+				return componentsBuilder.build().toUri();
+			}).retrieve().bodyToMono(QueryResponse.class);
+		});
 	}
 
+	/**
+	 * Get security info for a user.
+	 * @param username the username
+	 * @return the security info string
+	 */
 	public Mono<String> getSecurityInfo(String username) {
-		return this.communityWebClient.get().uri(uriBuilder -> {
-			uriBuilder.path("/")
+		return this.communityWebClient.get()
+			.uri(ignore -> UriComponentsBuilder.fromPath("/")
 				.queryParam("action", "UserRead")
 				.queryParam("SecurityInfo", "true")
 				.queryParam("DeferLogin", "true")
 				.queryParam("ResponseFormat", "SimpleJson")
-				.queryParam("UserName", username);
-			return uriBuilder.build();
-		})
+				.queryParam("UserName", username)
+				.build()
+				.toUri())
 			.retrieve()
 			.bodyToMono(UserReadResponse.class)
 			.map(response -> response.autnresponse().responsedata().securityinfo());
 	}
 
+	/**
+	 * Add documents to IDOL.
+	 * @param request the add document request
+	 * @return a mono that completes when done
+	 */
 	public Mono<Void> addDocument(AddDocumentRequest request) {
 		String idxContent = formatIdx(request.documents(), this.database);
-		byte[] body = (idxContent + "\r\n\r\n").getBytes();
+		byte[] body = (idxContent + "\r\n\r\n").getBytes(StandardCharsets.UTF_8);
 
-		return this.indexWebClient.post().uri(uriBuilder -> {
-			uriBuilder.path("/DREADDDATA");
-			return uriBuilder.build();
-		})
+		return this.indexWebClient.post()
+			.uri(ignore -> UriComponentsBuilder.fromPath("/DREADDDATA")
+				.queryParam("LanguageType", "EnglishUTF8")
+				.build()
+				.toUri())
 			.contentType(MediaType.APPLICATION_OCTET_STREAM)
 			.contentLength(body.length)
 			.bodyValue(body)
@@ -148,18 +181,47 @@ public class IdolApi {
 			.bodyToMono(Void.class);
 	}
 
+	/**
+	 * Delete documents from IDOL by reference.
+	 * @param idList the list of references to delete
+	 * @return a mono that completes when done
+	 */
 	public Mono<Void> delete(List<String> idList) {
-		String docs = idList.stream()
-			.map(id -> URLEncoder.encode(id, StandardCharsets.UTF_8))
-			.collect(Collectors.joining("+"));
+		String docs = idList.stream().map(id -> {
+			try {
+				return URLEncoder.encode(id, StandardCharsets.UTF_8.name());
+			}
+			catch (Exception e) {
+				throw new RuntimeException(e);
+			}
+		}).collect(Collectors.joining("+"));
 
-		return this.indexWebClient.get().uri(uriBuilder -> {
-			uriBuilder.path("/DREDELETEREF").queryParam("DREDbName", this.database);
-			return URI.create(uriBuilder.build().toString() + "&Docs=" + docs);
-		}).retrieve().bodyToMono(Void.class);
+		return this.indexWebClient.get()
+			.uri(ignore -> URI.create(UriComponentsBuilder.fromPath("/DREDELETEREF")
+				.queryParam("DREDbName", this.database)
+				.build()
+				.toUriString() + "&Docs=" + docs))
+			.retrieve()
+			.bodyToMono(Void.class);
 	}
 
-	private String formatIdx(List<IdolDocument> documents, String database) {
+	/**
+	 * Delete documents from IDOL by state ID.
+	 * @param stateId the state ID identifying the documents to delete
+	 * @return a mono that completes when done
+	 */
+	public Mono<Void> deleteByState(String stateId) {
+		Assert.hasText(stateId, "State ID must not be empty");
+		return this.indexWebClient.get()
+			.uri(ignore -> UriComponentsBuilder.fromPath("/DREDELETEDOC")
+				.queryParam("StateId", stateId)
+				.build()
+				.toUri())
+			.retrieve()
+			.bodyToMono(Void.class);
+	}
+
+	private String formatIdx(List<IdolDocument> documents, String docsDatabase) {
 		StringBuilder sb = new StringBuilder();
 		for (IdolDocument doc : documents) {
 			sb.append("#DREREFERENCE ").append(doc.reference()).append("\n");
@@ -176,11 +238,11 @@ public class IdolApi {
 				}
 			}
 
-			if (doc.vector() != null) {
+			if (doc.embedding() != null) {
 				sb.append("#DREFIELD ")
 					.append(this.vectorField)
 					.append("=\"")
-					.append(vectorToString(doc.vector()))
+					.append(vectorToString(doc.embedding()))
 					.append("\"\n");
 			}
 
@@ -199,14 +261,14 @@ public class IdolApi {
 				sb.append("#DRECONTENT\n").append(doc.content()).append("\n");
 			}
 
-			sb.append("#DREDBNAME ").append(database).append("\n");
+			sb.append("#DREDBNAME ").append(docsDatabase).append("\n");
 			sb.append("#DREENDDOC\n");
 		}
-		sb.append("#DREENDDATAREFERENCE");
+		sb.append("#DREENDDATAREFERENCE\r\n\r\n");
 		return sb.toString();
 	}
 
-	private String vectorToString(float[] vector) {
+	String vectorToString(float[] vector) {
 		StringBuilder sb = new StringBuilder();
 		for (int i = 0; i < vector.length; i++) {
 			sb.append(vector[i]);
@@ -217,57 +279,16 @@ public class IdolApi {
 		return sb.toString();
 	}
 
-	public record QueryRequest(String text, String fieldText, Integer maxResults, String username, String print,
-			String printFields, String vectorField) {
-
-		public QueryRequest(String text, String fieldText, Integer maxResults) {
-			this(text, fieldText, maxResults, null, null, null, null);
+	private String idolEncode(String value) {
+		if (value == null) {
+			return null;
 		}
-
-	}
-
-	@JsonIgnoreProperties(ignoreUnknown = true)
-	public record QueryResponse(@JsonProperty("autnresponse") AutnResponse autnResponse) {
-	}
-
-	@JsonIgnoreProperties(ignoreUnknown = true)
-	public record AutnResponse(@JsonProperty("responsedata") ResponseData responseData) {
-	}
-
-	@JsonIgnoreProperties(ignoreUnknown = true)
-	public record ResponseData(@JsonProperty("hit") List<Hit> hits) {
-	}
-
-	@JsonIgnoreProperties(ignoreUnknown = true)
-	public record Hit(@JsonProperty("id") String id, @JsonProperty("reference") String reference,
-			@JsonProperty("weight") Double weight, @JsonProperty("content") Content content) {
-	}
-
-	@JsonIgnoreProperties(ignoreUnknown = true)
-	public record Content(@JsonProperty("DOCUMENT") List<Map<String, List<String>>> documents) {
-	}
-
-	public record AddDocumentRequest(List<IdolDocument> documents, String username) {
-
-		public AddDocumentRequest(List<IdolDocument> documents) {
-			this(documents, null);
+		try {
+			return URLEncoder.encode(value, StandardCharsets.UTF_8.name()).replace("+", "%20");
 		}
-
-	}
-
-	public record IdolDocument(String reference, float[] vector, Map<String, Object> metadata, String content) {
-	}
-
-	@JsonIgnoreProperties(ignoreUnknown = true)
-	public record UserReadResponse(@JsonProperty("autnresponse") UserReadAutnResponse autnresponse) {
-	}
-
-	@JsonIgnoreProperties(ignoreUnknown = true)
-	public record UserReadAutnResponse(@JsonProperty("responsedata") UserReadResponseData responsedata) {
-	}
-
-	@JsonIgnoreProperties(ignoreUnknown = true)
-	public record UserReadResponseData(@JsonProperty("securityinfo") String securityinfo) {
+		catch (Exception e) {
+			throw new RuntimeException(e);
+		}
 	}
 
 }

@@ -90,7 +90,7 @@ class IdolVectorStoreTests {
 		ArgumentCaptor<AddDocumentRequest> captor = ArgumentCaptor.forClass(AddDocumentRequest.class);
 		verify(this.idolApi).addDocument(captor.capture());
 
-		IdolApi.AddDocumentRequest request = captor.getValue();
+		AddDocumentRequest request = captor.getValue();
 		assertThat(request.documents()).hasSize(1);
 		assertThat(request.documents().get(0).reference()).isEqualTo("1");
 		assertThat(request.documents().get(0).content()).isEqualTo("content");
@@ -110,7 +110,7 @@ class IdolVectorStoreTests {
 
 		IdolApi api = new IdolApi(webClient, webClient, webClient, "testdb", "custom_vector_field");
 
-		IdolApi.IdolDocument doc = new IdolApi.IdolDocument("ref1", new float[] { 0.1f },
+		IdolDocument doc = new IdolDocument("ref1", new float[] { 0.1f },
 				Map.of("meta1", "val1", "title", "Custom Title"), "content1");
 		api.addDocument(new IdolApi.AddDocumentRequest(List.of(doc), null)).block();
 
@@ -153,7 +153,7 @@ class IdolVectorStoreTests {
 		assertThat(results.get(0).getText()).isEqualTo("content1");
 		assertThat(results.get(0).getMetadata()).containsEntry("meta1", "val1");
 
-		ArgumentCaptor<IdolApi.QueryRequest> captor = ArgumentCaptor.forClass(IdolApi.QueryRequest.class);
+		ArgumentCaptor<QueryRequest> captor = ArgumentCaptor.forClass(QueryRequest.class);
 		verify(this.idolApi).query(captor.capture());
 		assertThat(captor.getValue().text()).contains("VECTOR{0.1,0.2:0}:Vector");
 		assertThat(captor.getValue().print()).isEqualTo("None");
@@ -179,7 +179,7 @@ class IdolVectorStoreTests {
 
 		vectorStore.similaritySearch(searchRequest);
 
-		ArgumentCaptor<IdolApi.QueryRequest> captor = ArgumentCaptor.forClass(IdolApi.QueryRequest.class);
+		ArgumentCaptor<QueryRequest> captor = ArgumentCaptor.forClass(QueryRequest.class);
 		verify(this.idolApi).query(captor.capture());
 		assertThat(captor.getValue().print()).isEqualTo("PrintFields");
 		assertThat(captor.getValue().printFields()).isEqualTo("meta1,meta2");
@@ -201,7 +201,7 @@ class IdolVectorStoreTests {
 		// Test using store's default custom vector field
 		vectorStore.similaritySearch("query");
 
-		ArgumentCaptor<IdolApi.QueryRequest> captor = ArgumentCaptor.forClass(IdolApi.QueryRequest.class);
+		ArgumentCaptor<QueryRequest> captor = ArgumentCaptor.forClass(QueryRequest.class);
 		verify(this.idolApi).query(captor.capture());
 		assertThat(captor.getValue().text()).contains("VECTOR{0.1,0.2:0}:store_vector_field");
 		assertThat(captor.getValue().vectorField()).isEqualTo("store_vector_field");
@@ -237,7 +237,7 @@ class IdolVectorStoreTests {
 
 		vectorStore.similaritySearch("query");
 
-		ArgumentCaptor<IdolApi.QueryRequest> captor = ArgumentCaptor.forClass(IdolApi.QueryRequest.class);
+		ArgumentCaptor<QueryRequest> captor = ArgumentCaptor.forClass(QueryRequest.class);
 		verify(this.idolApi).query(captor.capture());
 		assertThat(captor.getValue().text()).contains("VECTOR{0.1,0.2:0}:options_vector_field");
 	}
@@ -258,7 +258,7 @@ class IdolVectorStoreTests {
 
 		vectorStore.similaritySearch(SearchRequest.builder().query("query").filterExpression(expression).build());
 
-		ArgumentCaptor<IdolApi.QueryRequest> captor = ArgumentCaptor.forClass(IdolApi.QueryRequest.class);
+		ArgumentCaptor<QueryRequest> captor = ArgumentCaptor.forClass(QueryRequest.class);
 		verify(this.idolApi).query(captor.capture());
 		assertThat(captor.getValue().username()).isEqualTo("pdavie");
 	}
@@ -272,9 +272,9 @@ class IdolVectorStoreTests {
 			.thenReturn(this.requestHeadersSpec);
 		when(this.requestHeadersSpec.retrieve()).thenReturn(this.responseSpec);
 
-		IdolApi.UserReadResponse response = new IdolApi.UserReadResponse(
-				new IdolApi.UserReadAutnResponse(new IdolApi.UserReadResponseData("test+token")));
-		when(this.responseSpec.bodyToMono(IdolApi.UserReadResponse.class)).thenReturn(Mono.just(response));
+		UserReadResponse response = new UserReadResponse(
+				new UserReadAutnResponse(new UserReadResponseData("test+token")));
+		when(this.responseSpec.bodyToMono(UserReadResponse.class)).thenReturn(Mono.just(response));
 
 		IdolApi api = new IdolApi(webClient, webClient, communityWebClient, "testdb", "embedding");
 
@@ -292,7 +292,7 @@ class IdolVectorStoreTests {
 		when(this.requestHeadersUriSpec.uri(any(java.util.function.Function.class)))
 			.thenReturn(this.requestHeadersSpec);
 		when(this.requestHeadersSpec.retrieve()).thenReturn(this.responseSpec);
-		when(this.responseSpec.bodyToMono(IdolApi.QueryResponse.class)).thenReturn(Mono.empty());
+		when(this.responseSpec.bodyToMono(QueryResponse.class)).thenReturn(Mono.empty());
 
 		// Mock community client for security info
 		WebClient.RequestHeadersUriSpec communityHeadersUriSpec = org.mockito.Mockito
@@ -304,9 +304,8 @@ class IdolVectorStoreTests {
 		when(communityWebClient.get()).thenReturn(communityHeadersUriSpec);
 		when(communityHeadersUriSpec.uri(any(java.util.function.Function.class))).thenReturn(communityHeadersSpec);
 		when(communityHeadersSpec.retrieve()).thenReturn(communityResponseSpec);
-		when(communityResponseSpec.bodyToMono(IdolApi.UserReadResponse.class))
-			.thenReturn(Mono.just(new IdolApi.UserReadResponse(
-					new IdolApi.UserReadAutnResponse(new IdolApi.UserReadResponseData("test+token")))));
+		when(communityResponseSpec.bodyToMono(UserReadResponse.class)).thenReturn(
+				Mono.just(new UserReadResponse(new UserReadAutnResponse(new UserReadResponseData("test+token")))));
 
 		IdolApi api = new IdolApi(webClient, webClient, communityWebClient, "testdb", "embedding");
 
@@ -344,7 +343,7 @@ class IdolVectorStoreTests {
 
 		vectorStore.similaritySearch(SearchRequest.builder().query("query").filterExpression(expression).build());
 
-		ArgumentCaptor<IdolApi.QueryRequest> captor = ArgumentCaptor.forClass(IdolApi.QueryRequest.class);
+		ArgumentCaptor<QueryRequest> captor = ArgumentCaptor.forClass(QueryRequest.class);
 		verify(this.idolApi).query(captor.capture());
 		assertThat(captor.getValue().fieldText()).isEqualTo("MATCH{drama}:genre");
 	}
