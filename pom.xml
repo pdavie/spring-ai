@@ -903,6 +903,7 @@
 								<exclude>org.springframework.ai.vectorstore**/GemFire**IT.java</exclude>
 								<exclude>org.springframework.ai.vectorstore**/Hana**IT.java</exclude>
 								<exclude>org.springframework.ai.vectorstore**/Hana**IT.java</exclude>
+								<exclude>org.springframework.ai.vectorstore**/Idol**IT.java</exclude>
 								<exclude>org.springframework.ai.vectorstore**/Milvus**IT.java</exclude>
 								<exclude>org.springframework.ai.vectorstore**/MariaDB**IT.java</exclude>
 								<exclude>org.springframework.ai.vectorstore**/Mongo**IT.java</exclude>
