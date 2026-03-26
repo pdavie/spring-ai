@@ -21,7 +21,7 @@
 
 	<groupId>org.springframework.ai</groupId>
 	<artifactId>spring-ai-parent</artifactId>
-	<version>2.0.0-M3</version>
+	<version>2.0.0-M4</version>
 
 	<packaging>pom</packaging>
 	<url>https://github.com/spring-projects/spring-ai</url>
@@ -68,7 +68,6 @@
 		<module>vector-stores/spring-ai-couchbase-store</module>
 		<module>vector-stores/spring-ai-elasticsearch-store</module>
 		<module>vector-stores/spring-ai-gemfire-store</module>
-		<module>vector-stores/spring-ai-idol-store</module>
 		<module>vector-stores/spring-ai-hanadb-store</module>
 		<module>vector-stores/spring-ai-infinispan-store</module>
 		<module>vector-stores/spring-ai-mariadb-store</module>
@@ -140,7 +139,6 @@
 		<module>auto-configurations/vector-stores/spring-ai-autoconfigure-vector-store-couchbase</module>
 		<module>auto-configurations/vector-stores/spring-ai-autoconfigure-vector-store-elasticsearch</module>
 		<module>auto-configurations/vector-stores/spring-ai-autoconfigure-vector-store-gemfire</module>
-		<module>auto-configurations/vector-stores/spring-ai-autoconfigure-vector-store-idol</module>
 		<module>auto-configurations/vector-stores/spring-ai-autoconfigure-vector-store-infinispan</module>
 		<module>auto-configurations/vector-stores/spring-ai-autoconfigure-vector-store-mariadb</module>
 		<module>auto-configurations/vector-stores/spring-ai-autoconfigure-vector-store-milvus</module>
@@ -167,7 +165,6 @@
 		<module>spring-ai-spring-boot-starters/spring-ai-starter-vector-store-couchbase</module>
 		<module>spring-ai-spring-boot-starters/spring-ai-starter-vector-store-elasticsearch</module>
 		<module>spring-ai-spring-boot-starters/spring-ai-starter-vector-store-gemfire</module>
-		<module>spring-ai-spring-boot-starters/spring-ai-starter-vector-store-idol</module>
 		<module>spring-ai-spring-boot-starters/spring-ai-starter-vector-store-mariadb</module>
 		<module>spring-ai-spring-boot-starters/spring-ai-starter-vector-store-milvus</module>
 		<module>spring-ai-spring-boot-starters/spring-ai-starter-vector-store-mongodb-atlas</module>
@@ -901,7 +898,6 @@
 								<exclude>org.springframework.ai.vectorstore**/GemFire**IT.java</exclude>
 								<exclude>org.springframework.ai.vectorstore**/Hana**IT.java</exclude>
 								<exclude>org.springframework.ai.vectorstore**/Hana**IT.java</exclude>
-								<exclude>org.springframework.ai.vectorstore**/Idol**IT.java</exclude>
 								<exclude>org.springframework.ai.vectorstore**/Milvus**IT.java</exclude>
 								<exclude>org.springframework.ai.vectorstore**/MariaDB**IT.java</exclude>
 								<exclude>org.springframework.ai.vectorstore**/Mongo**IT.java</exclude>
